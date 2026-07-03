@@ -433,7 +433,7 @@ obs = {
 |------|---------|-------|------|
 | supply_pool | 市场挂单（卖方报价簿） | 策略写入，AllocationPolicy 读取 | 否 |
 | demand_pool | 市场询价（买方求购簿） | 策略写入，AllocationPolicy 读取 | 否 |
-| pending_orders | 已撮合、待交割的远期合约 | ClearingHouse 读写 | 否 |
+| pending_orders | 已分配、待交割的远期合约 | ClearingHouse 读写 | 否 |
 | collateral_pool | 交易保证金账户 | ClearingHouse 读写 | 否 |
 | obs | 上一 Tick 结束时的经济快照（财报/行情/公开报表） | 策略只读决策 | **是** |
 | goods | 商品分类目录（公开知识） | 策略可查，不加噪 | 否 |
