@@ -1,0 +1,8 @@
+seed: 42
+base_collateral_ratio: 0.1
+noise_type: "gaussian"
+order_expire_ticks: 30
+fulfillment_window_ticks: 30
+n_ticks: 30
+noise_params:
+  sigma: 0.1
