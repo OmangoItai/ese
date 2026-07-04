@@ -140,11 +140,11 @@
 
 ## 6. 策略层 + 分配层
 
-**产出**：`policies/registry.py`、`policies/demo_strategies.py`、补完 `core/simulator.py`
+**产出**：`core/registry.py`、`examples/demo_strategies.py`、补完 `core/simulator.py`
 
 **依据**：design.md §4.1（四类策略签名）、§4.2（obs 结构）
 
-- [x] 6.1 创建 `policies/__init__.py`、`policies/registry.py`
+- [x] 6.1 创建 `core/registry.py`
 - [x] 6.2 实现 `Registry`：四槽字典 `{"firm": None, "household": None, "government": None, "allocation": None}`，`register()` 和 `get()` 方法
 - [x] 6.3 实现 `simulator._build_observations(state)`：按 §4.2 结构构建 obs，含 my_supply_orders/my_demand_orders，经 InformationFriction 加噪（自身 my_state 不加噪）
 - [x] 6.4 实现 `simulator._execute_strategy(obs, state)`：按 F→H→G 顺序调用注册策略，处理 `{new, cancel, update}` 返回值
@@ -152,7 +152,7 @@
 - [x] 6.6 _execute_strategy 中 cancel：release_collateral → 从池移除 → status=CANCELLED → ledger.record_trade
 - [x] 6.7 _execute_strategy 中 update：新订单 validate 失败则整体跳过；通过后 cancel 旧 + new
 - [x] 6.8 实现 `simulator._execute_allocation(obs, state)`：调用 AllocationPolicy.allocate() → matched → ALLOCATED + settlement_tick=state.tick+delivery_lag → pending_orders；remaining 写回池
-- [x] 6.9 创建 `policies/demo_strategies.py`：FirmStrategy（生产 consumer good，挂 supply_pool）
+- [x] 6.9 创建 `examples/demo_strategies.py`：FirmStrategy（生产 consumer good，挂 supply_pool）
 - [x] 6.10 demo：HouseholdStrategy（用 cash 买 food，挂 demand_pool）
 - [x] 6.11 demo：GovernmentStrategy（调整 tax_rate，不参与交易）
 - [x] 6.12 demo：AllocationPolicy.allocate()（同 good_id 配对，价低 supply 优先）

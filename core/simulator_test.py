@@ -784,7 +784,7 @@ def _make_one_firm_one_hh_db() -> str:
 
 class TestStrategyRegistry:
     def test_register_and_get(self):
-        from policies.registry import Registry
+        from core.registry import Registry
 
         r = Registry()
 
@@ -796,14 +796,14 @@ class TestStrategyRegistry:
         assert r.get("household") is None
 
     def test_register_invalid_slot_raises(self):
-        from policies.registry import Registry
+        from core.registry import Registry
 
         r = Registry()
         with pytest.raises(ValueError, match="Unknown slot"):
             r.register("invalid", lambda x: x)
 
     def test_get_invalid_slot_raises(self):
-        from policies.registry import Registry
+        from core.registry import Registry
 
         r = Registry()
         with pytest.raises(ValueError, match="Unknown slot"):
@@ -812,8 +812,8 @@ class TestStrategyRegistry:
 
 class TestFirmDemoStrategy:
     def test_firm_demo_grows_supply_pool(self):
-        from policies.demo_strategies import firm_strategy
-        from policies.registry import Registry
+        from examples.demo_strategies import firm_strategy
+        from core.registry import Registry
 
         db_path = _make_one_firm_one_hh_db()
         config_path = _make_temp_config({"noise_type": "none"})
@@ -838,8 +838,8 @@ class TestFirmDemoStrategy:
             os.unlink(config_path)
 
     def test_firm_demo_buy_raw_material_grows_demand_pool(self):
-        from policies.demo_strategies import firm_strategy
-        from policies.registry import Registry
+        from examples.demo_strategies import firm_strategy
+        from core.registry import Registry
 
         db_path = _make_one_firm_one_hh_db()
         config_path = _make_temp_config({"noise_type": "none"})
@@ -865,8 +865,8 @@ class TestFirmDemoStrategy:
 
 class TestHouseholdDemoStrategy:
     def test_household_demo_grows_demand_pool(self):
-        from policies.demo_strategies import household_strategy
-        from policies.registry import Registry
+        from examples.demo_strategies import household_strategy
+        from core.registry import Registry
 
         db_path = _make_one_firm_one_hh_db()
         config_path = _make_temp_config({"noise_type": "none"})
@@ -893,12 +893,12 @@ class TestHouseholdDemoStrategy:
 
 class TestAllocationPolicy:
     def test_allocation_creates_matched_orders(self):
-        from policies.demo_strategies import (
+        from examples.demo_strategies import (
             firm_strategy,
             household_strategy,
             demo_allocation,
         )
-        from policies.registry import Registry
+        from core.registry import Registry
 
         db_path = _make_one_firm_one_hh_db()
         config_path = _make_temp_config({"noise_type": "none"})
@@ -926,7 +926,7 @@ class TestAllocationPolicy:
             os.unlink(config_path)
 
     def test_allocation_price_lowest_supply_first(self):
-        from policies.demo_strategies import demo_allocation
+        from examples.demo_strategies import demo_allocation
 
         db_path = _make_one_firm_one_hh_db()
         config_path = _make_temp_config({"noise_type": "none"})
@@ -992,12 +992,12 @@ class TestAllocationPolicy:
 
 class TestFullTickPipeline:
     def test_full_tick_inventory_transfer(self):
-        from policies.demo_strategies import (
+        from examples.demo_strategies import (
             firm_strategy,
             household_strategy,
             demo_allocation,
         )
-        from policies.registry import Registry
+        from core.registry import Registry
 
         db_path = _make_one_firm_one_hh_db()
         config_path = _make_temp_config({"noise_type": "none"})
@@ -1041,8 +1041,8 @@ class TestFullTickPipeline:
             os.unlink(config_path)
 
     def test_government_strategy_does_nothing(self):
-        from policies.demo_strategies import government_strategy
-        from policies.registry import Registry
+        from examples.demo_strategies import government_strategy
+        from core.registry import Registry
 
         db_path = _make_one_firm_one_hh_db()
         config_path = _make_temp_config({"noise_type": "none"})
@@ -1065,8 +1065,8 @@ class TestFullTickPipeline:
 
 class TestObsNoise:
     def test_agent_obs_my_state_noiseless(self):
-        from policies.demo_strategies import firm_strategy
-        from policies.registry import Registry
+        from examples.demo_strategies import firm_strategy
+        from core.registry import Registry
 
         db_path = _make_one_firm_one_hh_db()
         config_path = _make_temp_config(
@@ -1097,8 +1097,8 @@ class TestObsNoise:
             os.unlink(config_path)
 
     def test_agent_obs_none_noise_identical(self):
-        from policies.demo_strategies import firm_strategy
-        from policies.registry import Registry
+        from examples.demo_strategies import firm_strategy
+        from core.registry import Registry
 
         db_path = _make_one_firm_one_hh_db()
         config_path = _make_temp_config({"noise_type": "none"})
@@ -1117,8 +1117,8 @@ class TestObsNoise:
             os.unlink(config_path)
 
     def test_agent_obs_includes_pool_orders(self):
-        from policies.demo_strategies import firm_strategy
-        from policies.registry import Registry
+        from examples.demo_strategies import firm_strategy
+        from core.registry import Registry
 
         db_path = _make_one_firm_one_hh_db()
         config_path = _make_temp_config({"noise_type": "none"})

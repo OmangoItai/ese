@@ -55,7 +55,7 @@ uv sync
 ### 2. 生成初始世界
 
 ```bash
-uv run python config/generate_seed.py
+uv run python tools/generate_seed.py
 ```
 
 ### 3. 配置实验参数（`config/default.yaml`）
@@ -69,7 +69,7 @@ order_expire_ticks: 30
 
 ### 4. 编写策略
 
-在 `policies/` 目录编写以下策略函数并注册到 Registry：
+编写策略函数并注册到 Registry（参考 `examples/demo_strategies.py`）：
 
 | 策略插槽 | 职责 |
 |---|---|
@@ -82,8 +82,8 @@ order_expire_ticks: 30
 
 ```python
 from core.simulator import Simulator
-from policies.registry import Registry
-import policies.demo_strategies as demo
+from core.registry import Registry
+import examples.demo_strategies as demo
 
 reg = Registry()
 reg.register("firm", demo.firm_strategy)

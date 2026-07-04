@@ -20,11 +20,13 @@ ese/
 │   ├── clearing_house.py     # 结算器
 │   ├── noise.py              # InformationFriction
 │   ├── reporter.py           # 指标计算器
+│   ├── registry.py           # 策略注册表
 │   ├── simulator.py          # 主循环
 │   └── ledger.py             # 历史账本
-└── policies/                 # 用户策略（ESE 不内置默认策略）
-    ├── __init__.py
-    └── registry.py           # 策略注册表
+├── examples/                # 示例策略（demo 参考）
+│   └── demo_strategies.py
+└── tools/                   # 工具脚本
+    └── generate_seed.py     # 生成初始 world 数据库
 
 # 3. 核心模块
 
@@ -482,7 +484,7 @@ Ledger 用于策略查询和审计。ClearingHouse 内部维护独立的 `price_
 - core/clearing_house.py — 全部方法（价格追踪、双向冻结、All-or-Nothing 结算含劳动力、破产清算含 active_order_ids 清理、池过期）
 - core/simulator.py — 9 步 tick() + run() + _load_world()
 - core/ledger.py + core/noise.py + core/reporter.py — 完整实现
-- policies/registry.py — 空壳注册表
+- core/registry.py — 注册表
 - config/default.yaml — 运行参数
 
 # 附录：待解决问题

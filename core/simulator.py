@@ -9,7 +9,7 @@ from core.entities import Firm, Good, Government, Household, Order, WorldState
 from core.ledger import Ledger
 from core.noise import InformationFriction
 from core.reporter import Reporter
-from policies.registry import Registry
+from core.registry import Registry
 
 VALID_GOOD_TYPES = {"food", "labor", "capital", "consumer", "raw_material"}
 
