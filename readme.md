@@ -95,8 +95,10 @@ uv sync
 ### 2. 生成初始世界
 
 ```bash
-uv run python tools/generate_seed.py
+uv run python examples/generate_town.py
 ```
+
+这会在项目根目录生成 `town_world.db`（2 商品、2 企业、10 家庭、1 政府），并同步到 `config/seed_world.db`。
 
 ### 3. 配置实验参数（`config/default.yaml`）
 
@@ -109,31 +111,48 @@ order_expire_ticks: 30
 
 ### 4. 编写策略
 
-编写策略函数并注册到 Registry（参考 `examples/town_strategies.py`）。所有策略接收的第一个参数是 `MarketIntelligence`（聚合宏观情报），第二参数是主体自身（完整状态，无噪声）：
+ESE 使用 `Engine` 作为单一入口，槽名即装饰器方法名。参考 `examples/town_strategies.py`：
 
-| 策略插槽 | 签名 | 职责 |
-|---|---|---|
-| FirmStrategy | `(mi, firm, goods)` | 企业定价、生产、投资 |
-| HouseholdStrategy | `(mi, hh, goods)` | 家庭消费 |
-| GovernmentStrategy | `(mi, gov, goods)` | 征税、发放福利 |
-| AllocationPolicy | `(mi, supply_pool, demand_pool, goods)` | 匹配买卖订单（**制度灵魂**：按价格优先→市场；按配额→计划） |
+| 策略槽 | 注册方式 | 签名 | 职责 |
+|------|---------|------|------|
+| firm | `@ese.firm` | `(mi, firm, goods)` | 企业调度器（每 tick 每企业调用一次，内部按标签分发） |
+| firm 标签 | `@ese.firm.label("x")` | `(mi, firm, goods)` | 特定类型企业的策略（被调度器通过 `ese.firm.use("x", ...)` 调用） |
+| household | `@ese.household` | `(mi, hh, goods)` | 家庭消费 |
+| government | `@ese.government` | `(mi, gov, goods)` | 征税、发放福利 |
+| allocation | `@ese.allocation` | `(mi, supply_pool, demand_pool, goods, pricing=None)` | 匹配买卖订单（**制度灵魂**：按价格优先→市场；按配额→计划） |
+| allocation.pricing | `@ese.allocation.pricing` | `(supply_order, demand_order, config)` | 定价规则（引擎自动注入到 allocation 中） |
+
+> **调度器与标签策略的关系：** `@ese.firm` 是调度器——每 tick 被引擎对每个企业调用一次。调度器通过 `ese.firm.use(firm.strategy_label, mi, firm, goods)` 将具体企业分发到对应的标签策略。`@ese.firm.label("farm")` 注册一个标签策略实现。不是并列关系，是包含关系。
 
 ### 5. 运行实验
 
 ```python
-from core.simulator import Simulator
-from core.registry import Registry
+from ese import Engine
 import examples.town_strategies as town
 
-reg = Registry()
-reg.register("firm", town.firm_strategy)
-reg.register("household", town.household_strategy)
-reg.register("government", town.government_strategy)
-reg.register("allocation", town.town_allocation)
+ese = Engine("config/default.yaml", "town_world.db")
 
-sim = Simulator("config/default.yaml", "town_world.db")
-sim.set_registry(reg)
-snapshots = sim.run(n_ticks=50)
+@ese.firm
+def firm_orchestrator(mi, firm, goods):
+    return town.firm_strategy(mi, firm, goods)
+
+@ese.household
+def household_strategy(mi, hh, goods):
+    return town.household_strategy(mi, hh, goods)
+
+@ese.government
+def government_strategy(mi, gov, goods):
+    return town.government_strategy(mi, gov, goods)
+
+@ese.allocation
+def town_allocation(mi, supply, demand, goods, pricing=None):
+    return town.town_allocation(mi, supply, demand, goods, pricing)
+
+@ese.allocation.pricing
+def mid_pricing(supply, demand, config):
+    return town.mid_pricing(supply, demand, config)
+
+snapshots = ese.run(n_ticks=50)
 
 import pandas as pd
 pd.DataFrame(snapshots).to_csv("results.csv", index=False)

@@ -26,7 +26,8 @@ CREATE TABLE firms (
     cash REAL NOT NULL,
     capacity REAL NOT NULL DEFAULT 0.0,
     collateral REAL NOT NULL DEFAULT 0.0,
-    is_active INTEGER NOT NULL DEFAULT 1
+    is_active INTEGER NOT NULL DEFAULT 1,
+    strategy_label TEXT NOT NULL DEFAULT 'default'
 )
 """)
 
@@ -57,7 +58,8 @@ CREATE TABLE households (
     labor_ask_price REAL NOT NULL DEFAULT 0.0,
     is_employed INTEGER NOT NULL DEFAULT 0,
     employer_firm_id INTEGER,
-    unemployment_ticks INTEGER NOT NULL DEFAULT 0
+    unemployment_ticks INTEGER NOT NULL DEFAULT 0,
+    strategy_label TEXT NOT NULL DEFAULT 'default'
 )
 """)
 
@@ -78,7 +80,8 @@ CREATE TABLE governments (
     cash REAL NOT NULL,
     tax_rate REAL NOT NULL DEFAULT 0.0,
     money_supply REAL NOT NULL DEFAULT 0.0,
-    unemployment_benefit REAL NOT NULL DEFAULT 0.0
+    unemployment_benefit REAL NOT NULL DEFAULT 0.0,
+    strategy_label TEXT NOT NULL DEFAULT 'default'
 )
 """)
 
@@ -93,10 +96,10 @@ c.executemany(
 
 # ---- 企业 ----
 c.executemany(
-    "INSERT INTO firms VALUES (?,?,?,?,?)",
+    "INSERT INTO firms (id, cash, capacity, collateral, is_active, strategy_label) VALUES (?,?,?,?,?,?)",
     [
-        (101, 1000.0, 50.0, 0.0, 1),  # 农场：生产食物，需要工具
-        (102, 1000.0, 30.0, 0.0, 1),  # 工坊：生产工具，需要食物作为工人报酬
+        (101, 1000.0, 50.0, 0.0, 1, "farm"),  # 农场：生产食物，需要工具
+        (102, 1000.0, 30.0, 0.0, 1, "workshop"),  # 工坊：生产工具，需要食物作为工人报酬
     ],
 )
 
@@ -119,8 +122,11 @@ for i in range(1, 11):
     # 前5户已就业（分别去两家企业），后5户失业
     employed = 1 if i <= 5 else 0
     employer = 101 if i <= 3 else 102 if i <= 5 else None
-    households.append((i, cash, labor, employed, employer, 0))
-c.executemany("INSERT INTO households VALUES (?,?,?,?,?,?)", households)
+    households.append((i, cash, labor, employed, employer, 0, "default"))
+c.executemany(
+    "INSERT INTO households (id, cash, labor_ask_price, is_employed, employer_firm_id, unemployment_ticks, strategy_label) VALUES (?,?,?,?,?,?,?)",
+    households,
+)
 
 # ---- 家庭库存（每户有点食物） ----
 for i in range(1, 11):
@@ -143,8 +149,8 @@ c.executemany(
 
 # ---- 政府 ----
 c.execute(
-    "INSERT INTO governments VALUES (?,?,?,?,?)",
-    (201, 2000.0, 0.1, 0.0, 2.0),  # 税率10%，失业金2
+    "INSERT INTO governments (id, cash, tax_rate, money_supply, unemployment_benefit, strategy_label) VALUES (?,?,?,?,?,?)",
+    (201, 2000.0, 0.1, 0.0, 2.0, "default"),  # 税率10%，失业金2
 )
 
 conn.commit()

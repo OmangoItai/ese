@@ -1,6 +1,12 @@
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set, Tuple
 from collections import deque
+from enum import StrEnum
+
+
+class OrderSide(StrEnum):
+    SUPPLY = "supply"
+    DEMAND = "demand"
 
 
 @dataclass
@@ -19,7 +25,8 @@ class Order:
     good_id: int
     quantity: float
     price: float  # 单价
-    order_type: str = "B2C"  # B2B | B2C | foreclosure | employment
+    side: OrderSide = OrderSide.SUPPLY  # 决定进供应池还是需求池
+    description: str = ""  # 自由文本标签
     creation_tick: int = 0
     settlement_tick: int = 0  # 0=未分配哨兵；分配后=tick+delivery_lag
     status: str = "OPEN"  # OPEN→ALLOCATED→FULFILLED|DEFAULTED|CANCELLED|EXPIRED
@@ -35,6 +42,7 @@ class Firm:
     is_active: bool = True
     employees: List[int] = field(default_factory=list)
     active_order_ids: Set[str] = field(default_factory=set)  # OPEN/ALLOCATED 状态订单
+    strategy_label: str = "default"
     _fulfillment_log: deque[Tuple[int, int, int]] = field(
         default_factory=lambda: deque(maxlen=30)
     )  # (fulfilled, defaulted, tick) 按 Tick 聚合，maxlen=30 常数内存
@@ -49,6 +57,7 @@ class Household:
     is_employed: bool = False
     employer_firm_id: Optional[int] = None
     unemployment_ticks: int = 0
+    strategy_label: str = "default"
     _fulfillment_log: deque[Tuple[int, int, int]] = field(
         default_factory=lambda: deque(maxlen=30)
     )  # (fulfilled, defaulted, tick) 按 Tick 聚合，maxlen=30 常数内存
@@ -61,6 +70,7 @@ class Government:
     tax_rate: float = 0.0
     money_supply: float = 0.0  # 预留，当前版本不启用
     unemployment_benefit: float = 0.0
+    strategy_label: str = "default"
     _fulfillment_log: deque[Tuple[int, int, int]] = field(
         default_factory=lambda: deque(maxlen=30)
     )  # (fulfilled, defaulted, tick) 按 Tick 聚合，maxlen=30 常数内存（未来功能预留）

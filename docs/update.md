@@ -4,125 +4,109 @@
 
 ---
 
-## 0. 装饰器注册（统一基础设施）
+## 0. 策略注册（Engine 统一入口）
 
 ### 0.1 目标
 
-所有策略注册统一使用装饰器语法，提升代码可读性和编写效率。
+所有策略注册统一走 `Engine` 实例，槽名即装饰器方法名，无需魔术字符串。
 
 ### 0.2 实现方案
 
-扩展 `core/registry.py`，为所有插槽提供装饰器：
+新建 `ese/__init__.py`（公共 facade）和 `core/engine.py`（`Engine` 类）。内部用私有的 `core/_registry.py`（`_StrategyRegistry`）管理查表，用户不接触。
 
-```python
-# core/registry.py
-from functools import wraps
+`Engine` 提供四个装饰器属性：
 
-class Registry:
-    def __init__(self):
-        self._slots = {
-            "firm": None,
-            "household": None,
-            "government": None,
-            "allocation": None,
-            "pricing": None,      # 新增
-        }
-        self._tagged_strategies = {
-            "firm": {},
-            "household": {},
-            "government": {},
-        }
-
-    def register(self, slot: str, tag: str = None):
-        """统一装饰器：注册策略到指定插槽"""
-        def decorator(func):
-            if tag is None:
-                self._slots[slot] = func
-            else:
-                if slot not in self._tagged_strategies:
-                    self._tagged_strategies[slot] = {}
-                self._tagged_strategies[slot][tag] = func
-            return func
-        return decorator
-
-    def get(self, slot: str, tag: str = None):
-        if tag:
-            return self._tagged_strategies.get(slot, {}).get(tag)
-        return self._slots.get(slot)
-```
+| 属性 | 注册什么 | 标签装饰器 | 标签调用方法 |
+|------|----------|------------|------------|
+| `ese.firm` | 企业调度器（每 tick 每企业调用一次） | `ese.firm.label("x")` | `ese.firm.use("x", mi, firm, goods)` |
+| `ese.household` | 家庭调度器 | `ese.household.label("x")` | `ese.household.use("x", mi, hh, goods)` |
+| `ese.government` | 政府调度器 | `ese.government.label("x")` | `ese.government.use("x", mi, gov, goods)` |
+| `ese.allocation` | 分配策略 + 定价子槽 | — | `ese.allocation.pricing`（定价装饰器） |
 
 ### 0.3 使用示例
 
 ```python
-# 注册企业主策略（无标签）
-@reg.register("firm")
-def firm_strategy(market_intelligence, firm, goods):
-    tag_strategy = reg.get("firm", firm.strategy_tag)
-    if tag_strategy:
-        return tag_strategy(market_intelligence, firm, goods)
-    return default_firm_strategy(market_intelligence, firm, goods)
+from ese import Engine
 
-# 注册标签策略
-@reg.register("firm", tag="farm")
-def farm_strategy(market_intelligence, firm, goods):
-    pass
+ese = Engine("config/default.yaml", "town_world.db")
 
-@reg.register("firm", tag="workshop")
-def workshop_strategy(market_intelligence, firm, goods):
-    pass
+# ==== 企业：调度器 + 标签策略 ====
+@ese.firm
+def firm_orchestrator(mi, firm, goods):
+    """每 tick 每企业调用一次，负责分发到标签策略"""
+    return ese.firm.use(firm.strategy_label, mi, firm, goods)
+
+@ese.firm.label("farm")
+def farm_strategy(mi, firm, goods):
+    ...
+
+@ese.firm.label("workshop")
+def workshop_strategy(mi, firm, goods):
+    ...
+
+# ==== 分配 + 定价 ====
+@ese.allocation
+def town_allocation(mi, supply, demand, goods, pricing=None):
+    """pricing 参数由引擎自动注入"""
+    price = pricing(s, d, {}) if pricing else (s.price + d.price) / 2
+    ...
+
+@ese.allocation.pricing
+def mid_pricing(supply, demand, config):
+    return (supply.price + demand.price) / 2
+
+# ==== 运行 ====
+snapshots = ese.run(n_ticks=50)
 ```
+
+### 0.4 语义约定
+
+- `@ese.firm`：注册**调度器**（orchestrator）——每 tick 被引擎对每个企业调用一次。调度器自己决定按什么顺序、用什么条件分发到标签策略。
+- `@ese.firm.label("x")`：注册**标签策略**（labeled strategy）——被调度器通过 `ese.firm.use("x", ...)` 调用。调度器和标签策略不是并列关系，而是包含关系。
+- `ese.firm.use(label, mi, entity, goods)`：调度器内部触发标签策略。找不到对应标签时发出 `RuntimeWarning` 并返回空 result（`{"new": [], "cancel": [], "update": []}`），不抛异常。
+- `strategy_label`：Firm/Household/Government 实体上的字段（`str`，默认 `"default"`），定义在种子数据库中。引擎或调度器根据此字段决定哪个标签策略生效。没有被分配到标签策略的实体，调度器应发出运行时警告。
 
 ---
 
-## 1. 定价策略：从分配策略中独立
+## 1. 定价策略：作为 allocation 的子槽
 
 ### 1.1 目标
 
-定价逻辑从 allocation 中剥离，作为独立的 `pricing` 插槽，必须手动注册到分配逻辑中。
+定价逻辑从 allocation 中剥离，挂载为 `ese.allocation.pricing`。引擎在执行 allocation 时自动解析定价函数并注入为参数。
 
 ### 1.2 实现方案
 
-**Step 1：在 Registry 中新增 pricing 插槽**
+**Step 1：注册定价策略**
 
 ```python
-reg.register("pricing", my_pricing_rule)
+@ese.allocation.pricing
+def mid_pricing(supply_order, demand_order, config) -> float:
+    """根据供需订单返回成交价"""
+    return (supply_order.price + demand_order.price) / 2
 ```
 
-**Step 2：定价策略函数签名**
+**Step 2：分配策略接受 pricing 参数（引擎自动注入）**
 
 ```python
-def pricing_rule(supply_order: Order, demand_order: Order, config: dict) -> float:
-    """
-    根据供需订单和配置，返回成交价。
-
-    内置机制：
-    - "ask": 取卖方报价
-    - "bid": 取买方报价
-    - "mid": 取 (ask + bid) / 2
-    - "negotiated": 纳什议价（可扩展）
-    """
-    mechanism = config.get("pricing_mechanism", "mid")
-    if mechanism == "ask":
-        return supply_order.price
-    elif mechanism == "bid":
-        return demand_order.price
-    elif mechanism == "mid":
-        return (supply_order.price + demand_order.price) / 2.0
-    # ... 其他机制
-```
-
-**Step 3：分配策略中调用定价策略**
-
-```python
-@reg.register("allocation")
-def town_allocation(obs, supply_pool, demand_pool, goods, config):
+@ese.allocation
+def town_allocation(mi, supply_pool, demand_pool, goods, pricing=None):
     matched = []
-    # ... 匹配逻辑（找出谁和谁成交）...
     for s, d in matched_pairs:
-        price = reg.get("pricing")(s, d, config)
+        price = pricing(s, d, {}) if pricing else (s.price + d.price) / 2
         matched.append(create_matched_order(s, d, price))
     return matched, remaining_supply, remaining_demand
 ```
+
+**Step 3：引擎内部注入**
+
+```python
+# simulator.py —— _execute_allocation
+allocate_fn = self._reg.get("allocation")
+pricing_fn = self._reg.get_pricing()
+matched, rem_s, rem_d = allocate_fn(mi, supply, demand, goods, pricing_fn)
+```
+
+定价函数签名：`(supply_order: Order, demand_order: Order, config: dict) -> float`
 
 ### 1.3 配置文件支持
 
@@ -134,84 +118,83 @@ pricing_mechanism: "mid"  # ask | bid | mid | negotiated
 
 ---
 
-## 2. 策略架构：标签化 + 组合执行
+## 2. 策略架构：调度器 + 标签策略
 
 ### 2.1 目标
 
-- 对不同标签的主体注册不同的策略函数
-- 企业/家庭/政府主策略中，每个主体可分别执行标签对应的策略函数
-- 用户可手动编写执行顺序（先执行哪些标签，再执行哪些标签）
+- 对不同标签的主体注册不同的策略函数（`@ese.firm.label("x")`）
+- 企业/家庭/政府主策略（`@ese.firm`）是调度器，负责按主体标签分发到具体策略
+- 调度器自行控制执行顺序（先处理哪些标签的企业，再处理哪些）
 
 ### 2.2 实现方案
 
-**Step 1：为主体增加 `strategy_tag` 和 `strategy_order` 字段**
+**Step 1：为主体增加 `strategy_label` 字段**
 
 ```python
 # core/entities.py
+@dataclass
 class Firm:
-    def __init__(self, ...):
-        self.strategy_tag = "default"      # 标签
-        self.strategy_order = ["default"]  # 执行顺序（用户可配置）
+    id: int
+    ...
+    strategy_label: str = "default"
 ```
 
-**Step 2：主策略支持按标签分发 + 按顺序执行**
+种子数据库中指定每类企业的标签：
+
+```sql
+-- firms 表
+INSERT INTO firms (id, cash, capacity, strategy_label) VALUES
+    (101, 1000.0, 50.0, 'farm'),
+    (102, 500.0,  30.0, 'workshop');
+```
+
+**Step 2：调度器按标签分发**
 
 ```python
-@reg.register("firm")
-def firm_strategy(market_intelligence, firm, goods):
+@ese.firm
+def firm_orchestrator(mi, firm, goods):
+    """每 tick 每企业调用一次，查看 firm.strategy_label 并分发"""
+    return ese.firm.use(firm.strategy_label, mi, firm, goods)
+
+@ese.firm.label("farm")
+def farm_strategy(mi, firm, goods):
     result = {"new": [], "cancel": [], "update": []}
-
-    for tag in firm.strategy_order:
-        tag_strategy = reg.get("firm", tag)
-        if tag_strategy:
-            partial = tag_strategy(market_intelligence, firm, goods)
-            result = merge_strategy_results(result, partial)
-
+    # 农场逻辑
     return result
 
-
-def merge_strategy_results(base, override):
-    """后执行的策略覆盖先执行的同名订单"""
-    merged = {"new": [], "cancel": [], "update": []}
-    # ... 合并逻辑
-    return merged
+@ese.firm.label("workshop")
+def workshop_strategy(mi, firm, goods):
+    result = {"new": [], "cancel": [], "update": []}
+    # 工坊逻辑
+    return result
 ```
 
-**Step 3：用户配置示例**
+调度器可以更复杂——按编排顺序、合并多个标签策略的结果：
 
 ```python
-farm = Firm(
-    id=101,
-    strategy_tag="farm",
-    strategy_order=["production", "pricing", "hiring"]
-)
-
-# 或更细粒度
-farm.strategy_order = [
-    "farm_production",
-    "cost_plus_pricing",
-    "passive_hiring",
-]
+@ese.firm
+def composed_orchestrator(mi, firm, goods):
+    result = {"new": [], "cancel": [], "update": []}
+    for label in firm.strategy_order:
+        partial = ese.firm.use(label, mi, firm, goods)
+        result = merge_strategy_results(result, partial)
+    return result
 ```
+
+**Step 3：`ese.firm.use(label, ...)` 行为约定**
+
+- 找到标签策略 → 调用并返回结果
+- 找不到标签策略 → `warnings.warn()` + 返回 `{"new": [], "cancel": [], "update": []}`
+- 不抛异常
 
 ### 2.3 设计哲学：组合优于继承
 
-不采用类继承体系，而是采用行为组件（Component）组合的方式：
+不采用类继承体系，而是采用调度器 + 标签策略的组合方式：
 
-```python
-# 给企业打组件标签
-farm = Firm(components=["production_food", "pricing_cost_plus", "hiring_passive"])
-workshop = Firm(components=["production_tool", "pricing_market_follower", "hiring_active"])
+- **调度器**（`@ese.firm`）负责编排逻辑（先处理谁、后处理谁、结果如何合并）
+- **标签策略**（`@ese.firm.label("x")`）是原子的策略实现，只关心"这类企业该做什么"
 
-# 策略路由器按组件顺序执行
-def firm_strategy(obs, firm):
-    result = {}
-    for comp in firm.components:
-        result.update(STRATEGY_COMPONENTS[comp](obs, firm))
-    return result
-```
-
-> 优势：新增策略只需写一个新组件函数，贴给任意企业，零继承，零侵入。
+新增策略只需写一个新标签函数并用 `@ese.firm.label("x")` 注册，调度器无需改动（只要调度器通配分发）。
 
 ---
 
@@ -574,11 +557,10 @@ def run(self, n_ticks: int):
 
 | 优先级 | 模块 | 工作量 | 依赖 |
 |--------|------|--------|------|
-| **P0** | 装饰器注册 (`registry.py`) | 小 | 无 |
+| **P0** | Engine + 策略注册 (`ese/` `core/engine.py` `core/_registry.py`) | 小 | 无 |
 | **P0** | 数据层 (`datastore.py`) | 中 | 无 |
-| **P1** | 定价策略独立 (`pricing` 插槽) | 小 | P0 |
 | **P1** | MarketIntelligence 数据结构 | 小 | P0 |
-| **P2** | 策略标签化 + 组合执行 | 中 | P0 |
+| **P2** | 策略标签化（调度器 + `ese.firm.label`） | 中 | P0 |
 | **P2** | 指标计算器 (`metrics.py`) | 中 | P0 |
 | **P3** | Reporter 硬编码输出 | 中 | P1, P2 |
 | **P3** | 迁移 `generate_town.py` 到新 API | 小 | P0 |
@@ -588,19 +570,23 @@ def run(self, n_ticks: int):
 ## 7. 文件结构变更
 
 ```text
-ese/
+ese/                            # 项目根
+├── ese/                        # 新增：公共包（对外唯一入口）
+│   └── __init__.py             # from core.engine import Engine; re-export 实体类
 ├── core/
-│   ├── registry.py             # 修改：装饰器 + 标签支持
+│   ├── _registry.py            # 新增：_StrategyRegistry（内部查表，用户不碰）
+│   ├── engine.py               # 新增：Engine + _Slot + _AllocationSlot（用户入口）
+│   ├── registry.py             # 删除：功能迁移到 _registry.py + engine.py
 │   ├── datastore.py            # 新增：Repository 层
 │   ├── market_intelligence.py  # 新增：MarketIntelligence 数据结构 + 构建器
 │   ├── metrics.py              # 新增：指标计算器
-│   ├── simulator.py            # 修改：集成 DataStore + Metrics
+│   ├── simulator.py            # 修改：接受 _StrategyRegistry，use _reg.get() 分发，注入 pricing
 │   ├── reporter.py             # 修改：硬编码输出
-│   └── entities.py             # 修改：增加 strategy_tag, strategy_order
+│   └── entities.py             # 修改：Firm/Household/Government 增加 strategy_label: str
 ├── config/
 │   └── default.yaml            # 修改：增加 pricing_mechanism, data_lag, reporting_bias
 ├── examples/
-│   └── town_strategies.py      # 重构：标签化策略
+│   └── town_strategies.py      # 重构：@ese.firm / @ese.firm.label 装饰器风格
 └── tools/
-    └── generate_town.py        # 重构：使用 DataStore API
+    └── generate_town.py        # 重构：firms/households 表增加 strategy_label 列
 ```

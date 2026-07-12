@@ -4,18 +4,25 @@ from typing import Dict, List
 import yaml
 
 from core.clearing_house import ClearingHouse
-from core.entities import Firm, Good, Government, Household, Order, WorldState
+from core.entities import (
+    Firm,
+    Good,
+    Government,
+    Household,
+    Order,
+    OrderSide,
+    WorldState,
+)
 from core.ledger import Ledger
 from core.market_intelligence import MarketIntelligence, MarketIntelligenceBuilder
 from core.noise import InformationFriction
 from core.reporter import Reporter
-from core.registry import Registry
 
 VALID_GOOD_TYPES = {"food", "labor", "capital", "consumer", "raw_material"}
 
 
 class Simulator:
-    def __init__(self, config_path: str, world_db_path: str):
+    def __init__(self, config_path: str, world_db_path: str, strategy_registry=None):
         self.config = self._load_config(config_path)
         self.ledger = Ledger()
         self.noise = InformationFriction(seed=self.config.get("seed", 42))
@@ -31,10 +38,7 @@ class Simulator:
             self.noise, self.reporter, self.config
         )
         self.mi = self.mi_builder.build(self.state, self.ledger)
-        self.registry = Registry()
-
-    def set_registry(self, registry: "Registry") -> None:
-        self.registry = registry
+        self._reg = strategy_registry
 
     @staticmethod
     def _load_config(config_path: str) -> Dict:
@@ -65,16 +69,23 @@ class Simulator:
                 )
 
             firms: Dict[int, Firm] = {}
-            c.execute("SELECT id, cash, capacity, collateral, is_active FROM firms")
+            c.execute(
+                "SELECT id, cash, capacity, collateral, is_active, strategy_label FROM firms"
+            )
+            cols = [d[0] for d in c.description]
             for row in c.fetchall():
-                fid, cash, capacity, collateral, is_active = row
-                firms[fid] = Firm(
-                    id=fid,
-                    cash=float(cash),
-                    capacity=float(capacity),
-                    collateral=float(collateral),
-                    is_active=bool(is_active),
-                )
+                row_dict = dict(zip(cols, row))
+                fid = row_dict["id"]
+                kwargs = {
+                    "id": fid,
+                    "cash": float(row_dict["cash"]),
+                    "capacity": float(row_dict["capacity"]),
+                    "collateral": float(row_dict["collateral"]),
+                    "is_active": bool(row_dict["is_active"]),
+                }
+                if "strategy_label" in cols:
+                    kwargs["strategy_label"] = row_dict["strategy_label"]
+                firms[fid] = Firm(**kwargs)
 
             c.execute("SELECT firm_id, good_id, quantity FROM firm_inventory")
             for row in c.fetchall():
@@ -91,18 +102,23 @@ class Simulator:
             households: Dict[int, Household] = {}
             c.execute(
                 "SELECT id, cash, labor_ask_price, is_employed, "
-                "employer_firm_id, unemployment_ticks FROM households"
+                "employer_firm_id, unemployment_ticks, strategy_label FROM households"
             )
+            cols = [d[0] for d in c.description]
             for row in c.fetchall():
-                hid, cash, labor_ask_price, is_employed, employer_firm_id, uticks = row
-                households[hid] = Household(
-                    id=hid,
-                    cash=float(cash),
-                    labor_ask_price=float(labor_ask_price),
-                    is_employed=bool(is_employed),
-                    employer_firm_id=employer_firm_id,
-                    unemployment_ticks=uticks,
-                )
+                row_dict = dict(zip(cols, row))
+                hid = row_dict["id"]
+                kwargs = {
+                    "id": hid,
+                    "cash": float(row_dict["cash"]),
+                    "labor_ask_price": float(row_dict["labor_ask_price"]),
+                    "is_employed": bool(row_dict["is_employed"]),
+                    "employer_firm_id": row_dict["employer_firm_id"],
+                    "unemployment_ticks": row_dict["unemployment_ticks"],
+                }
+                if "strategy_label" in cols:
+                    kwargs["strategy_label"] = row_dict["strategy_label"]
+                households[hid] = Household(**kwargs)
 
             c.execute("SELECT household_id, good_id, quantity FROM household_inventory")
             for row in c.fetchall():
@@ -112,18 +128,23 @@ class Simulator:
 
             governments: Dict[int, Government] = {}
             c.execute(
-                "SELECT id, cash, tax_rate, money_supply, unemployment_benefit "
+                "SELECT id, cash, tax_rate, money_supply, unemployment_benefit, strategy_label "
                 "FROM governments"
             )
+            cols = [d[0] for d in c.description]
             for row in c.fetchall():
-                gid, cash, tax_rate, money_supply, unemployment_benefit = row
-                governments[gid] = Government(
-                    id=gid,
-                    cash=float(cash),
-                    tax_rate=float(tax_rate),
-                    money_supply=float(money_supply),
-                    unemployment_benefit=float(unemployment_benefit),
-                )
+                row_dict = dict(zip(cols, row))
+                gid = row_dict["id"]
+                kwargs = {
+                    "id": gid,
+                    "cash": float(row_dict["cash"]),
+                    "tax_rate": float(row_dict["tax_rate"]),
+                    "money_supply": float(row_dict["money_supply"]),
+                    "unemployment_benefit": float(row_dict["unemployment_benefit"]),
+                }
+                if "strategy_label" in cols:
+                    kwargs["strategy_label"] = row_dict["strategy_label"]
+                governments[gid] = Government(**kwargs)
 
             if len(governments) != 1:
                 raise ValueError(
@@ -251,34 +272,31 @@ class Simulator:
                     hh.cash += amount
 
     def _execute_strategy(self, mi: MarketIntelligence, state: WorldState) -> None:
-        for firm in state.firms.values():
-            if not firm.is_active:
-                continue
-            strategy = self.registry.get("firm")
-            if strategy is None:
-                continue
-            self._dispatch_agent_result(
-                state,
-                strategy(mi, firm, state.goods),
-            )
+        firm_fn = self._reg.get("firm") if self._reg else None
+        if firm_fn is not None:
+            for firm in state.firms.values():
+                if not firm.is_active:
+                    continue
+                self._dispatch_agent_result(
+                    state,
+                    firm_fn(mi, firm, state.goods),
+                )
 
-        for hh in state.households.values():
-            strategy = self.registry.get("household")
-            if strategy is None:
-                continue
-            self._dispatch_agent_result(
-                state,
-                strategy(mi, hh, state.goods),
-            )
+        hh_fn = self._reg.get("household") if self._reg else None
+        if hh_fn is not None:
+            for hh in state.households.values():
+                self._dispatch_agent_result(
+                    state,
+                    hh_fn(mi, hh, state.goods),
+                )
 
-        for gov in state.governments.values():
-            strategy = self.registry.get("government")
-            if strategy is None:
-                continue
-            self._dispatch_agent_result(
-                state,
-                strategy(mi, gov, state.goods),
-            )
+        gov_fn = self._reg.get("government") if self._reg else None
+        if gov_fn is not None:
+            for gov in state.governments.values():
+                self._dispatch_agent_result(
+                    state,
+                    gov_fn(mi, gov, state.goods),
+                )
 
     def _dispatch_agent_result(
         self,
@@ -319,9 +337,9 @@ class Simulator:
         state.all_orders[order.order_id] = order
         self.clearing.freeze_collateral(state, order)
 
-        if order.seller_id != 0:
+        if order.side == OrderSide.SUPPLY:
             state.supply_pool.append(order)
-        if order.buyer_id != 0:
+        elif order.side == OrderSide.DEMAND:
             state.demand_pool.append(order)
 
     def _cancel_order(self, state: WorldState, order_id: str) -> None:
@@ -339,12 +357,18 @@ class Simulator:
             state.demand_pool.remove(order)
 
     def _execute_allocation(self, mi: MarketIntelligence, state: WorldState) -> None:
-        allocate_fn = self.registry.get("allocation")
+        allocate_fn = self._reg.get("allocation") if self._reg else None
         if allocate_fn is None:
             return
 
+        pricing_fn = self._reg.get_pricing() if self._reg else None
+
         matched, remaining_supply, remaining_demand = allocate_fn(
-            mi, list(state.supply_pool), list(state.demand_pool), state.goods
+            mi,
+            list(state.supply_pool),
+            list(state.demand_pool),
+            state.goods,
+            pricing_fn,
         )
 
         state.supply_pool = remaining_supply

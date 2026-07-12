@@ -30,7 +30,7 @@ class TestOrder:
             price=5.0,
         )
         assert o.order_id == "ord_1"
-        assert o.order_type == "B2C"
+        assert o.description == ""
         assert o.creation_tick == 0
         assert o.settlement_tick == 0
         assert o.status == "OPEN"
@@ -56,19 +56,20 @@ class TestOrder:
             o.status = s
             assert o.status == s
 
-    def test_four_order_types(self):
-        valid_types = {"B2B", "B2C", "foreclosure", "employment"}
-        for ot in valid_types:
+    def test_order_side_enum(self):
+        from core.entities import OrderSide
+
+        for side in (OrderSide.SUPPLY, OrderSide.DEMAND):
             o = Order(
-                order_id="ord_3",
+                order_id="ord_test",
                 seller_id=1,
                 buyer_id=2,
                 good_id=1,
                 quantity=10.0,
                 price=5.0,
-                order_type=ot,
+                side=side,
             )
-            assert o.order_type == ot
+            assert o.side == side
 
     def test_settlement_tick_sentinel(self):
         o = Order(

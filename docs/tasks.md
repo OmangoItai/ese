@@ -19,7 +19,7 @@
 - [x] 1.7 实现 `WorldState` dataclass（tick, firms, households, governments, goods, supply_pool, demand_pool, pending_orders, all_orders, collateral_pool）
 - [x] 1.8 为 Firm/Household/Government 添加 `_fulfillment_log: deque[Tuple[int,int,int]]` 字段（(fulfilled, defaulted, tick) 按 Tick 聚合，maxlen=30 常数内存）
 - [x] 1.9 编写 `core/entities_test.py`：实例化所有类、断言默认值、WorldState 嵌套组装
-- [x] 1.10 验证：`python -m pytest core/entities_test.py -v` 全绿
+- [x] 1.10 验证：`uv run pytest core/entities_test.py -v` 全绿
 
 ---
 
@@ -39,7 +39,7 @@
 - [x] 2.8 实现 `apply_noise(value, noise_type, params)` 支持 5 种噪声（gaussian/uniform/upward_bias/downward_bias/none）
 - [x] 2.9 实现 `apply_dict(values, noise_type, params)` 批量施加噪声
 - [x] 2.10 编写 `core/noise_test.py`：seed=42 时 1000 次 gaussian(sigma=0.1) 均值偏差 < 0.05；bias 检验方向正确
-- [x] 2.11 验证：`python -m pytest core/ledger_test.py core/noise_test.py -v` 全绿
+- [x] 2.11 验证：`uv run pytest core/ledger_test.py core/noise_test.py -v` 全绿
 
 ---
 
@@ -64,7 +64,7 @@
 - [x] 3a.11 编写测试：freeze → cash 减少 collateral_pool 有键；release → 恢复并删除
 - [x] 3a.12 编写测试：forfeit("seller") → 卖方 cash 不恢复，买方 cash 增加卖方冻结额
 - [x] 3a.13 编写测试：3 笔成交价记录 → get_market_price_range 返回正确 (min, max, avg)
-- [x] 3a.14 验证：`python -m pytest core/clearing_house_test.py -v` 全绿
+- [x] 3a.14 验证：`uv run pytest core/clearing_house_test.py -v` 全绿
 
 ### 3b. 结算 + 破产 + 池过期
 
@@ -89,7 +89,7 @@
 - [x] 3b.15 编写测试：labor 结算 → household.is_employed=True, firm.employees 包含 household_id
 - [x] 3b.16 编写测试：结算后 firm.cash<0 → liquidate_firm 触发，员工 is_employed=False
 - [x] 3b.17 编写测试：池中订单超时 → EXPIRED，抵押品释放
-- [x] 3b.18 验证：`python -m pytest core/clearing_house_test.py -v` 全绿
+- [x] 3b.18 验证：`uv run pytest core/clearing_house_test.py -v` 全绿
 
 ---
 
@@ -109,7 +109,7 @@
 - [x] 4.8 编写测试：造一批 food 交易 → engel 在 0~1 区间
 - [x] 4.9 编写测试：5 户中 2 户失业 → unemployment == 0.4
 - [x] 4.10 编写测试：snapshot 返回字典包含全部指标键
-- [x] 4.11 验证：`python -m pytest core/reporter_test.py -v` 全绿
+- [x] 4.11 验证：`uv run pytest core/reporter_test.py -v` 全绿
 
 ---
 
@@ -134,7 +134,7 @@
 - [x] 5.13 编写测试：pay_wages → firm.cash 减少、household.cash 增加，金额正确
 - [x] 5.14 编写测试：collect_taxes → Government.cash 增加
 - [x] 5.15 编写测试：连续 5 个 tick 循环不崩溃
-- [x] 5.16 验证：`python -m pytest core/simulator_test.py -v` 全绿
+- [x] 5.16 验证：`uv run pytest core/simulator_test.py -v` 全绿
 
 ---
 
@@ -161,7 +161,7 @@
 - [x] 6.15 编写测试：Allocation 配对 → pending_orders 有 ALLOCATED 订单
 - [x] 6.16 编写测试：完整 1 tick → Firm inventory 减少、Household inventory 增加、双方 cash 变更
 - [x] 6.17 编写测试：obs 中 my_state 无噪声，all_firms 有噪声
-- [x] 6.18 验证：`python -m pytest core/simulator_test.py -v` 全绿
+- [x] 6.18 验证：`uv run pytest core/simulator_test.py -v` 全绿
 
 ---
 
@@ -237,16 +237,122 @@
 
 - [x] 7.5.1 修改 `core/simulator_test.py`：`TestBuildObservations` → `TestMarketIntelligence`；`TestObsNoise` → `TestMiNoise`；所有 obs 字典断言调整为 mi 字段断言
 - [x] 7.5.2 新增 `core/market_intelligence_test.py`：MI 测试内嵌于 `simulator_test.py` 的 `TestMarketIntelligence` 和 `TestMiNoise` 类中
-- [x] 7.5.3 验证：`python -m pytest core/simulator_test.py -v` **36/36 全绿**
-- [x] 7.5.4 验证：`python -m pytest core/ -v` **158/158 全绿**
+- [x] 7.5.3 验证：`uv run pytest core/simulator_test.py -v` **36/36 全绿**
+- [x] 7.5.4 验证：`uv run pytest core/ -v` **158/158 全绿**
 - [x] 7.5.5 端到端验证：`uv run python examples/generate_town.py && uv run python examples/town.py` → **正常跑完 50 tick，输出 CSV/图表**
+
+---
+
+## 8. 策略注册重构：Registry → Engine + _Slot
+
+**产出**：`core/_registry.py`、`core/engine.py`、`ese/__init__.py`；删除 `core/registry.py`；修改 `core/entities.py`、`core/simulator.py`；重写 `examples/town_strategies.py`、`examples/town.py`
+
+**依据**：docs/update.md §0、§1、§2、§7
+
+**动机**：
+
+- 当前 `Registry` 使用魔术字符串 `reg.register("firm", fn)` + `reg.get("firm")`，无 IDE 补全，`reg` 既要注册又要 get 语义混乱
+- 新设计用 `Engine` 作为唯一入口，槽名即方法名：`@ese.firm`、`@ese.firm.label("farm")`、`ese.firm.use("farm", mi, firm, goods)`
+- `@ese.firm` 是调度器（orchestrator），`@ese.firm.label("x")` 是标签策略，调度器通过 `ese.firm.use(...)` 分发。不是并列关系，是包含关系
+- pricing 挂载为 `@ese.allocation.pricing` 子槽，引擎执行 allocation 时自动注入
+- 无匹配标签时 `ese.firm.use(...)` 发 `RuntimeWarning` + 返回空 result，不抛异常
+- 新增顶层 `ese/` 包作为对外唯一 facade
+
+---
+
+### 8.1 新建内部查表层 `core/_registry.py`
+
+- [x] 8.1.1 实现 `_Slot` 类：`__init__(name)`，属性 `name`、`primary: Optional[Callable]`、`labeled: Dict[str, Callable]`
+- [x] 8.1.2 `_Slot.set_primary(func)`：设置主策略（调度器）
+- [x] 8.1.3 `_Slot.set_labeled(label, func)`：设置标签策略
+- [x] 8.1.4 `_Slot.get(label=None) -> Optional[Callable]`：`label` 为 `None` 返回 primary，否则返回 `labeled[label]`（不存在返回 `None`）
+- [x] 8.1.5 实现 `_StrategyRegistry` 类：`__init__()` 创建四个 `_Slot`（firm/household/government/allocation）+ `_pricing: Optional[Callable]`
+- [x] 8.1.6 `_StrategyRegistry.set_primary(slot, func)` / `set_labeled(slot, label, func)` / `set_pricing(func)` / `get(slot, label=None)` / `get_pricing()`
+
+### 8.2 新建用户入口层 `core/engine.py`
+
+- [x] 8.2.1 实现 `_Slot` 类（装饰器代理，与 `_registry._Slot` 不同）：
+  - `__init__(registry: _StrategyRegistry, slot_name: str)`：持有 `_reg` 和 `_name`
+  - `__call__(func)`：装饰器，`_reg.set_primary(_name, func)`，返回 `func`
+  - `label(label: str)`：返回装饰器，内层 `_reg.set_labeled(_name, label, func)`
+  - `use(label: str, mi, entity, goods)`：`strategy = _reg.get(_name, label)`；找到则 `strategy(mi, entity, goods)`；找不到则 `warnings.warn(RuntimeWarning)` + 返回 `{"new": [], "cancel": [], "update": []}`
+- [x] 8.2.2 实现 `_AllocationSlot(_Slot)`：
+  - 继承 `_Slot`，`__init__` 调用 `super().__init__(registry, "allocation")`
+  - `pricing` 属性（`@property`）：返回装饰器，内层 `_reg.set_pricing(func)`
+- [x] 8.2.3 实现 `Engine` 类：
+  - `__init__(config_path, world_db_path)`：创建 `_StrategyRegistry()` + `Simulator(config_path, world_db_path, self._registry)`；将 `_registry` 传入 Simulator 构造函数（替代旧的 `set_registry`）
+  - 创建四个属性：`self.firm = _Slot(...)`、`self.household = _Slot(...)`、`self.government = _Slot(...)`、`self.allocation = _AllocationSlot(...)`
+  - `run(n_ticks: int) -> List[Dict]`：委托 `self._simulator.run(n_ticks)`
+
+### 8.3 新建公共 facade `ese/__init__.py`
+
+- [x] 8.3.1 创建 `ese/__init__.py`
+- [x] 8.3.2 `from core.engine import Engine`
+- [x] 8.3.3 re-export：`from core.entities import Good, Order, Firm, Household, Government, WorldState`
+- [x] 8.3.4 re-export：`from core.market_intelligence import MarketIntelligence`
+
+### 8.4 修改 `core/entities.py`
+
+- [x] 8.4.1 `Firm` dataclass 新增 `strategy_label: str = "default"`
+- [x] 8.4.2 `Household` dataclass 新增 `strategy_label: str = "default"`
+- [x] 8.4.3 `Government` dataclass 新增 `strategy_label: str = "default"`
+
+### 8.5 修改 `core/simulator.py`
+
+- [x] 8.5.1 删除 `from core.registry import Registry` 导入
+- [x] 8.5.2 删除 `self.registry = Registry()` 和 `set_registry()` 方法
+- [x] 8.5.3 `Simulator.__init__` 接受 `strategy_registry: _StrategyRegistry` 参数（由 `Engine` 传入），存为 `self._reg`
+- [x] 8.5.4 `_execute_strategy(self, mi, state)`：`firm_fn = self._reg.get("firm")`，遍历 `state.firms` 调用 `firm_fn(mi, firm, state.goods)`，`dispatch_agent_result` 处理返回值。household/government 同理
+- [x] 8.5.5 `_execute_allocation(self, mi, state)`：`allocate_fn = self._reg.get("allocation")`；`pricing_fn = self._reg.get_pricing()`；调用 `allocate_fn(mi, supply, demand, goods, pricing_fn)`
+- [x] 8.5.6 分配函数签名变更：`allocate_fn(mi, supply_pool, demand_pool, goods, pricing=None)` — 引擎注入 pricing 为第 5 个参数
+
+### 8.6 删除旧 `core/registry.py`
+
+- [x] 8.6.1 删除 `core/registry.py`（功能已迁移到 `_registry.py` + `engine.py`）
+
+### 8.7 重写 `examples/town_strategies.py`
+
+- [x] 8.7.1 从 `from core.registry import Registry` → 策略函数改为接收 `mi: MarketIntelligence, entity, goods` 签名（与现有 mi 重构一致）
+- [x] 8.7.2 无 `Registry` 实例——策略文件只定义纯函数，注册在 `town.py` 中通过 `@ese.xxx` 完成
+- [x] 8.7.3 firm 调度器：`@ese.firm` 定义的函数体用 `ese.firm.use(firm.strategy_label, mi, firm, goods)` 分发
+- [x] 8.7.4 标签策略：`@ese.firm.label("farm")` 注册农场逻辑，`@ese.firm.label("workshop")` 注册工坊逻辑
+- [x] 8.7.5 allocation 策略：`@ese.allocation` 注册，签名含 `pricing=None` 参数
+- [x] 8.7.6 pricing 策略：`@ese.allocation.pricing` 注册，签名 `(supply_order, demand_order, config)`
+
+### 8.8 重写 `examples/town.py`
+
+- [x] 8.8.1 `from ese import Engine`
+- [x] 8.8.2 创建 `ese = Engine("config/default.yaml", "town_world.db")`
+- [x] 8.8.3 装饰器注册所有策略（`@ese.firm`、`@ese.firm.label(...)`、`@ese.household`、`@ese.government`、`@ese.allocation`、`@ese.allocation.pricing`）
+- [x] 8.8.4 `snapshots = ese.run(n_ticks=50)`
+- [x] 8.8.5 保存 CSV、绘图逻辑不变
+
+### 8.9 适配测试
+
+- [x] 8.9.1 修改 `core/simulator_test.py`：删除对 `Registry` 的导入和 `set_registry` 调用；用 `_StrategyRegistry` + `Simulator(..., registry)` 替代
+- [x] 8.9.2 新增 `core/engine_test.py`：测试 `_Slot.__call__` 注册、`label()` 注册、`use()` 查+调、无标签 warning
+- [x] 8.9.3 新增 `core/engine_test.py`：测试 `_AllocationSlot.pricing` 注册 + `get_pricing()` 获取
+- [x] 8.9.4 验证：`uv run pytest core/ -v` 全绿
+
+### 8.10 迁移种子数据库
+
+- [x] 8.10.1 修改 `tools/generate_town.py`：firms/households INSERT 增加 `strategy_label TEXT DEFAULT 'default'` 列
+- [x] 8.10.2 修改 `core/simulator._load_world`：firms 表读取时增加 `strategy_label` 字段
+- [x] 8.10.3 重新生成 `town_world.db` 和 `config/seed_world.db`
+- [x] 8.10.4 现有数据 `strategy_label` 统一填充 `"default"`
+
+### 8.11 端到端验证
+
+- [x] 8.11.1 `uv run python examples/town.py` → 正常跑完 50 tick，输出 CSV/图表
+- [x] 8.11.2 无注册策略的实体 → 控制台输出 `RuntimeWarning`（而非 crash）
+- [x] 8.11.3 `uv run pytest core/ -v` 全绿
 
 ---
 
 ## 依赖关系
 
 ```
-1(entities) ─→ 2(ledger+noise) ─→ 3a(clearing part1) ─→ 3b(clearing part2) ─→ 4(reporter) ─→ 5(simulator kernel) ─→ 6(strategies) ─→ 7(obs→MI refactor)
+1(entities) ─→ 2(ledger+noise) ─→ 3a(clearing part1) ─→ 3b(clearing part2) ─→ 4(reporter) ─→ 5(simulator kernel) ─→ 6(strategies) ─→ 7(obs→MI refactor) ─→ 8(registry→Engine)
 ```
 
 每轮严格按顺序执行，前一轮全部打勾才进入下一轮。

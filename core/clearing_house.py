@@ -469,7 +469,7 @@ class ClearingHouse:
                 good_id=good_id,
                 quantity=qty,
                 price=min_price,
-                order_type="foreclosure",
+                description="foreclosure",
                 creation_tick=state.tick,
                 settlement_tick=state.tick,
                 status="FULFILLED",

@@ -6,7 +6,15 @@ import pytest
 import yaml
 
 from core.clearing_house import ClearingHouse
-from core.entities import Firm, Good, Government, Household, Order, WorldState
+from core.entities import (
+    Firm,
+    Good,
+    Government,
+    Household,
+    Order,
+    OrderSide,
+    WorldState,
+)
 from core.ledger import Ledger
 from core.noise import InformationFriction
 from core.simulator import Simulator
@@ -34,7 +42,8 @@ def _make_temp_db(rows_dict: dict) -> str:
             id INTEGER PRIMARY KEY, cash REAL NOT NULL,
             capacity REAL NOT NULL DEFAULT 0.0,
             collateral REAL NOT NULL DEFAULT 0.0,
-            is_active INTEGER NOT NULL DEFAULT 1)"""
+            is_active INTEGER NOT NULL DEFAULT 1,
+            strategy_label TEXT NOT NULL DEFAULT 'default')"""
     )
     c.execute(
         """CREATE TABLE firm_inventory (
@@ -53,7 +62,8 @@ def _make_temp_db(rows_dict: dict) -> str:
             labor_ask_price REAL NOT NULL DEFAULT 0.0,
             is_employed INTEGER NOT NULL DEFAULT 0,
             employer_firm_id INTEGER,
-            unemployment_ticks INTEGER NOT NULL DEFAULT 0)"""
+            unemployment_ticks INTEGER NOT NULL DEFAULT 0,
+            strategy_label TEXT NOT NULL DEFAULT 'default')"""
     )
     c.execute(
         """CREATE TABLE household_inventory (
@@ -66,24 +76,34 @@ def _make_temp_db(rows_dict: dict) -> str:
             id INTEGER PRIMARY KEY, cash REAL NOT NULL,
             tax_rate REAL NOT NULL DEFAULT 0.0,
             money_supply REAL NOT NULL DEFAULT 0.0,
-            unemployment_benefit REAL NOT NULL DEFAULT 0.0)"""
+            unemployment_benefit REAL NOT NULL DEFAULT 0.0,
+            strategy_label TEXT NOT NULL DEFAULT 'default')"""
     )
 
     for table, rows in rows_dict.items():
         if table == "goods":
             c.executemany("INSERT INTO goods VALUES (?,?,?,?)", rows)
         elif table == "firms":
-            c.executemany("INSERT INTO firms VALUES (?,?,?,?,?)", rows)
+            c.executemany(
+                "INSERT INTO firms (id, cash, capacity, collateral, is_active) VALUES (?,?,?,?,?)",
+                rows,
+            )
         elif table == "firm_inventory":
             c.executemany("INSERT INTO firm_inventory VALUES (?,?,?)", rows)
         elif table == "firm_employees":
             c.executemany("INSERT INTO firm_employees VALUES (?,?)", rows)
         elif table == "households":
-            c.executemany("INSERT INTO households VALUES (?,?,?,?,?,?)", rows)
+            c.executemany(
+                "INSERT INTO households (id, cash, labor_ask_price, is_employed, employer_firm_id, unemployment_ticks) VALUES (?,?,?,?,?,?)",
+                rows,
+            )
         elif table == "household_inventory":
             c.executemany("INSERT INTO household_inventory VALUES (?,?,?)", rows)
         elif table == "governments":
-            c.executemany("INSERT INTO governments VALUES (?,?,?,?,?)", rows)
+            c.executemany(
+                "INSERT INTO governments (id, cash, tax_rate, money_supply, unemployment_benefit) VALUES (?,?,?,?,?)",
+                rows,
+            )
 
     conn.commit()
     conn.close()
@@ -763,7 +783,8 @@ class TestMarketIntelligence:
                 good_id=1,
                 quantity=3.0,
                 price=2.0,
-                order_type="B2C",
+                side=OrderSide.SUPPLY,
+                description="B2C",
                 creation_tick=tick,
             )
             demand = Order(
@@ -773,7 +794,8 @@ class TestMarketIntelligence:
                 good_id=1,
                 quantity=2.0,
                 price=2.0,
-                order_type="B2C",
+                side=OrderSide.DEMAND,
+                description="B2C",
                 creation_tick=tick,
             )
             sim.state.supply_pool.append(supply)
@@ -818,46 +840,122 @@ def _make_one_firm_one_hh_db() -> str:
     )
 
 
+def _firm_strategy_for_test(mi, firm, goods):
+    """兼容测试用：firm 101+102 的合并策略，替代已删除的 examples.town.firm_strategy"""
+    result = {"new": [], "cancel": [], "update": []}
+    tick = mi.tick
+    if firm.id == 101:
+        tool_inv = firm.inventory.get(2, 0.0)
+        if tool_inv >= 1.0:
+            firm.inventory[2] = tool_inv - 1.0
+            firm.inventory[1] = firm.inventory.get(1, 0.0) + 5.0
+        food_qty = firm.inventory.get(1, 0.0)
+        if food_qty > 2.0:
+            sell_qty = min(food_qty - 2.0, 10.0)
+            result["new"].append(
+                Order(
+                    order_id=f"f{firm.id}_sell_{tick}_{len(result['new'])}",
+                    seller_id=firm.id,
+                    buyer_id=0,
+                    good_id=1,
+                    quantity=sell_qty,
+                    price=2.0,
+                    side=OrderSide.SUPPLY,
+                    description="B2C",
+                    creation_tick=tick,
+                )
+            )
+        if firm.cash > 50.0 and firm.inventory.get(2, 0.0) < 10.0:
+            result["new"].append(
+                Order(
+                    order_id=f"f{firm.id}_buy_{tick}_{len(result['new'])}",
+                    seller_id=0,
+                    buyer_id=firm.id,
+                    good_id=2,
+                    quantity=2.0,
+                    price=3.0,
+                    side=OrderSide.DEMAND,
+                    description="B2B",
+                    creation_tick=tick,
+                )
+            )
+    elif firm.id == 102:
+        food_inv = firm.inventory.get(1, 0.0)
+        if food_inv >= 2.0:
+            firm.inventory[1] = food_inv - 2.0
+            firm.inventory[2] = firm.inventory.get(2, 0.0) + 3.0
+        tool_qty = firm.inventory.get(2, 0.0)
+        if tool_qty > 2.0:
+            sell_qty = min(tool_qty - 2.0, 5.0)
+            result["new"].append(
+                Order(
+                    order_id=f"f{firm.id}_sell_{tick}_{len(result['new'])}",
+                    seller_id=firm.id,
+                    buyer_id=0,
+                    good_id=2,
+                    quantity=sell_qty,
+                    price=3.0,
+                    side=OrderSide.SUPPLY,
+                    description="B2B",
+                    creation_tick=tick,
+                )
+            )
+        if firm.cash > 50.0 and firm.inventory.get(1, 0.0) < 10.0:
+            result["new"].append(
+                Order(
+                    order_id=f"f{firm.id}_buy_{tick}_{len(result['new'])}",
+                    seller_id=0,
+                    buyer_id=firm.id,
+                    good_id=1,
+                    quantity=3.0,
+                    price=2.0,
+                    side=OrderSide.DEMAND,
+                    description="B2C",
+                    creation_tick=tick,
+                )
+            )
+    return result
+
+
 class TestStrategyRegistry:
     def test_register_and_get(self):
-        from core.registry import Registry
+        from core._registry import _StrategyRegistry
 
-        r = Registry()
+        r = _StrategyRegistry()
 
         def dummy_firm(obs, firm, goods):
             return {"new": [], "cancel": [], "update": []}
 
-        r.register("firm", dummy_firm)
+        r.set_primary("firm", dummy_firm)
         assert r.get("firm") is dummy_firm
         assert r.get("household") is None
 
     def test_register_invalid_slot_raises(self):
-        from core.registry import Registry
+        from core._registry import _StrategyRegistry
 
-        r = Registry()
-        with pytest.raises(ValueError, match="Unknown slot"):
-            r.register("invalid", lambda x: x)
+        r = _StrategyRegistry()
+        with pytest.raises(KeyError):
+            r.set_primary("invalid", lambda x: x)
 
     def test_get_invalid_slot_raises(self):
-        from core.registry import Registry
+        from core._registry import _StrategyRegistry
 
-        r = Registry()
-        with pytest.raises(ValueError, match="Unknown slot"):
+        r = _StrategyRegistry()
+        with pytest.raises(KeyError):
             r.get("invalid")
 
 
 class TestFirmDemoStrategy:
     def test_firm_demo_grows_supply_pool(self):
-        from examples.town_strategies import firm_strategy
-        from core.registry import Registry
+        firm_strategy = _firm_strategy_for_test
+        from core._registry import _StrategyRegistry
 
         db_path = _make_one_firm_one_hh_db()
         config_path = _make_temp_config({"noise_type": "none"})
         try:
-            sim = Simulator(config_path, db_path)
-            reg = Registry()
-            reg.register("firm", firm_strategy)
-            sim.set_registry(reg)
+            reg = _StrategyRegistry()
+            sim = Simulator(config_path, db_path, reg)
+            reg.set_primary("firm", firm_strategy)
 
             assert len(sim.state.supply_pool) == 0
 
@@ -874,16 +972,15 @@ class TestFirmDemoStrategy:
             os.unlink(config_path)
 
     def test_firm_demo_buy_raw_material_grows_demand_pool(self):
-        from examples.town_strategies import firm_strategy
-        from core.registry import Registry
+        firm_strategy = _firm_strategy_for_test
+        from core._registry import _StrategyRegistry
 
         db_path = _make_one_firm_one_hh_db()
         config_path = _make_temp_config({"noise_type": "none"})
         try:
-            sim = Simulator(config_path, db_path)
-            reg = Registry()
-            reg.register("firm", firm_strategy)
-            sim.set_registry(reg)
+            reg = _StrategyRegistry()
+            sim = Simulator(config_path, db_path, reg)
+            reg.set_primary("firm", firm_strategy)
 
             assert len(sim.state.demand_pool) == 0
 
@@ -901,16 +998,15 @@ class TestFirmDemoStrategy:
 
 class TestHouseholdDemoStrategy:
     def test_household_demo_grows_demand_pool(self):
-        from examples.town_strategies import household_strategy
-        from core.registry import Registry
+        from examples.town import household_strategy
+        from core._registry import _StrategyRegistry
 
         db_path = _make_one_firm_one_hh_db()
         config_path = _make_temp_config({"noise_type": "none"})
         try:
-            sim = Simulator(config_path, db_path)
-            reg = Registry()
-            reg.register("household", household_strategy)
-            sim.set_registry(reg)
+            reg = _StrategyRegistry()
+            sim = Simulator(config_path, db_path, reg)
+            reg.set_primary("household", household_strategy)
 
             assert len(sim.state.demand_pool) == 0
 
@@ -919,7 +1015,7 @@ class TestHouseholdDemoStrategy:
             hh_orders = [o for o in sim.state.demand_pool if o.buyer_id == 201]
             assert len(hh_orders) > 0
             for o in hh_orders:
-                assert o.order_type == "B2C"
+                assert o.side == OrderSide.DEMAND
                 assert o.status == "OPEN"
         finally:
             os.unlink(db_path)
@@ -928,22 +1024,18 @@ class TestHouseholdDemoStrategy:
 
 class TestAllocationPolicy:
     def test_allocation_creates_matched_orders(self):
-        from examples.town_strategies import (
-            firm_strategy,
-            household_strategy,
-            demo_allocation,
-        )
-        from core.registry import Registry
+        firm_strategy = _firm_strategy_for_test
+        from examples.town import household_strategy, town_allocation
+        from core._registry import _StrategyRegistry
 
         db_path = _make_one_firm_one_hh_db()
         config_path = _make_temp_config({"noise_type": "none"})
         try:
-            sim = Simulator(config_path, db_path)
-            reg = Registry()
-            reg.register("firm", firm_strategy)
-            reg.register("household", household_strategy)
-            reg.register("allocation", demo_allocation)
-            sim.set_registry(reg)
+            reg = _StrategyRegistry()
+            sim = Simulator(config_path, db_path, reg)
+            reg.set_primary("firm", firm_strategy)
+            reg.set_primary("household", household_strategy)
+            reg.set_primary("allocation", town_allocation)
 
             assert len(sim.state.pending_orders) == 0
 
@@ -961,7 +1053,7 @@ class TestAllocationPolicy:
             os.unlink(config_path)
 
     def test_allocation_price_lowest_supply_first(self):
-        from examples.town_strategies import demo_allocation
+        from examples.town import town_allocation
 
         db_path = _make_one_firm_one_hh_db()
         config_path = _make_temp_config({"noise_type": "none"})
@@ -976,7 +1068,8 @@ class TestAllocationPolicy:
                 good_id=1,
                 quantity=3.0,
                 price=1.0,
-                order_type="B2C",
+                side=OrderSide.SUPPLY,
+                description="B2C",
                 creation_tick=tick,
             )
             supply_expensive = Order(
@@ -986,7 +1079,8 @@ class TestAllocationPolicy:
                 good_id=1,
                 quantity=3.0,
                 price=5.0,
-                order_type="B2C",
+                side=OrderSide.SUPPLY,
+                description="B2C",
                 creation_tick=tick,
             )
             demand = Order(
@@ -996,7 +1090,8 @@ class TestAllocationPolicy:
                 good_id=1,
                 quantity=3.0,
                 price=3.0,
-                order_type="B2C",
+                side=OrderSide.DEMAND,
+                description="B2C",
                 creation_tick=tick,
             )
 
@@ -1009,7 +1104,7 @@ class TestAllocationPolicy:
             sim.clearing.freeze_collateral(sim.state, supply_expensive)
             sim.clearing.freeze_collateral(sim.state, demand)
 
-            matched, _, _ = demo_allocation(
+            matched, _, _ = town_allocation(
                 sim.mi,
                 list(sim.state.supply_pool),
                 list(sim.state.demand_pool),
@@ -1027,22 +1122,18 @@ class TestAllocationPolicy:
 
 class TestFullTickPipeline:
     def test_full_tick_inventory_transfer(self):
-        from examples.town_strategies import (
-            firm_strategy,
-            household_strategy,
-            demo_allocation,
-        )
-        from core.registry import Registry
+        firm_strategy = _firm_strategy_for_test
+        from examples.town import household_strategy, town_allocation
+        from core._registry import _StrategyRegistry
 
         db_path = _make_one_firm_one_hh_db()
         config_path = _make_temp_config({"noise_type": "none"})
         try:
-            sim = Simulator(config_path, db_path)
-            reg = Registry()
-            reg.register("firm", firm_strategy)
-            reg.register("household", household_strategy)
-            reg.register("allocation", demo_allocation)
-            sim.set_registry(reg)
+            reg = _StrategyRegistry()
+            sim = Simulator(config_path, db_path, reg)
+            reg.set_primary("firm", firm_strategy)
+            reg.set_primary("household", household_strategy)
+            reg.set_primary("allocation", town_allocation)
 
             firm = sim.state.firms[101]
             hh = sim.state.households[201]
@@ -1073,16 +1164,15 @@ class TestFullTickPipeline:
             os.unlink(config_path)
 
     def test_government_strategy_does_nothing(self):
-        from examples.town_strategies import government_strategy
-        from core.registry import Registry
+        from examples.town import government_strategy
+        from core._registry import _StrategyRegistry
 
         db_path = _make_one_firm_one_hh_db()
         config_path = _make_temp_config({"noise_type": "none"})
         try:
-            sim = Simulator(config_path, db_path)
-            reg = Registry()
-            reg.register("government", government_strategy)
-            sim.set_registry(reg)
+            reg = _StrategyRegistry()
+            sim = Simulator(config_path, db_path, reg)
+            reg.set_primary("government", government_strategy)
 
             pools_before = len(sim.state.supply_pool) + len(sim.state.demand_pool)
 
@@ -1097,8 +1187,8 @@ class TestFullTickPipeline:
 
 class TestMiNoise:
     def test_mi_noise_applied_with_gaussian(self):
-        from examples.town_strategies import firm_strategy
-        from core.registry import Registry
+        firm_strategy = _firm_strategy_for_test
+        from core._registry import _StrategyRegistry
 
         db_path = _make_one_firm_one_hh_db()
         config_path = _make_temp_config(
@@ -1109,10 +1199,9 @@ class TestMiNoise:
             }
         )
         try:
-            sim = Simulator(config_path, db_path)
-            reg = Registry()
-            reg.register("firm", firm_strategy)
-            sim.set_registry(reg)
+            reg = _StrategyRegistry()
+            sim = Simulator(config_path, db_path, reg)
+            reg.set_primary("firm", firm_strategy)
 
             mi = sim.mi
             assert isinstance(mi.gini, float)
@@ -1123,16 +1212,15 @@ class TestMiNoise:
             os.unlink(config_path)
 
     def test_mi_none_noise_no_side_effects(self):
-        from examples.town_strategies import firm_strategy
-        from core.registry import Registry
+        firm_strategy = _firm_strategy_for_test
+        from core._registry import _StrategyRegistry
 
         db_path = _make_one_firm_one_hh_db()
         config_path = _make_temp_config({"noise_type": "none"})
         try:
-            sim = Simulator(config_path, db_path)
-            reg = Registry()
-            reg.register("firm", firm_strategy)
-            sim.set_registry(reg)
+            reg = _StrategyRegistry()
+            sim = Simulator(config_path, db_path, reg)
+            reg.set_primary("firm", firm_strategy)
 
             mi_no_noise = sim.mi
 
