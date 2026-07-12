@@ -2,7 +2,7 @@
 import sqlite3
 import os
 
-DB_PATH = "town_world.db"
+DB_PATH = "examples/town_world.db"
 
 if os.path.exists(DB_PATH):
     os.remove(DB_PATH)

@@ -8,14 +8,11 @@ from typing import Dict, Tuple, List
 from ese import Engine
 from core.entities import Order, Firm, Good, Government, Household, OrderSide
 from core.market_intelligence import MarketIntelligence
-import pandas as pd
-import matplotlib.pyplot as plt
-
 # ============================================================
 # 初始化引擎
 # ============================================================
 
-ese = Engine("config/default.yaml", "town_world.db")
+ese = Engine("config/default.yaml", "town_world.db", output_dir="./examples/results")
 
 # ============================================================
 # 企业策略
@@ -274,19 +271,4 @@ def mid_pricing(supply: Order, demand: Order, config: dict) -> float:
 # ============================================================
 
 snapshots = ese.run(n_ticks=50)
-
-df = pd.DataFrame(snapshots)
-df.to_csv("town_results.csv", index=False)
-
-fig, axes = plt.subplots(2, 2, figsize=(12, 8))
-axes[0, 0].plot(df["tick"], df["gini"])
-axes[0, 0].set_title("Gini")
-axes[0, 1].plot(df["tick"], df["unemployment"], color="r")
-axes[0, 1].set_title("Unemployment")
-axes[1, 0].plot(df["tick"], df["engel"], color="g")
-axes[1, 0].set_title("Engel")
-axes[1, 1].plot(df["tick"], df["active_firms"], color="m")
-axes[1, 1].set_title("Active Firms")
-plt.tight_layout()
-plt.savefig("town_results.png")
-print("Done. Saved town_results.csv and town_results.png")
+ese.save(snapshots, prefix="town")

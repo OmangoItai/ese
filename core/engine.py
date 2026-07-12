@@ -1,3 +1,4 @@
+import os
 import warnings
 from typing import Dict, List
 
@@ -48,9 +49,12 @@ class _AllocationSlot(_Slot):
 
 
 class Engine:
-    def __init__(self, config_path: str, world_db_path: str):
+    def __init__(
+        self, config_path: str, world_db_path: str, output_dir: str = "./output"
+    ):
         self._registry = _StrategyRegistry()
         self._simulator = Simulator(config_path, world_db_path, self._registry)
+        self.output_dir = output_dir
 
         self.firm = _Slot(self._registry, "firm")
         self.household = _Slot(self._registry, "household")
@@ -59,3 +63,50 @@ class Engine:
 
     def run(self, n_ticks: int) -> List[Dict]:
         return self._simulator.run(n_ticks)
+
+    def save(self, snapshots: List[Dict], prefix: str = "ese") -> str:
+        os.makedirs(self.output_dir, exist_ok=True)
+
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        import pandas as pd
+
+        df = pd.DataFrame(snapshots)
+
+        csv_path = os.path.join(self.output_dir, f"{prefix}_results.csv")
+        df.to_csv(csv_path, index=False)
+
+        plot_fields = [
+            ("gini", "Gini"),
+            ("unemployment", "Unemployment"),
+            ("engel", "Engel"),
+            ("active_firms", "Active Firms"),
+        ]
+        visible = [(col, title) for col, title in plot_fields if col in df.columns]
+
+        if visible:
+            n = len(visible)
+            cols = min(2, n)
+            rows = (n + cols - 1) // cols
+            fig, axes = plt.subplots(rows, cols, figsize=(6 * cols, 5 * rows))
+            if rows * cols == 1:
+                axes = [axes]
+            else:
+                axes = axes.flatten()
+
+            for i, (col, title) in enumerate(visible):
+                axes[i].plot(df["tick"], df[col])
+                axes[i].set_title(title)
+
+            for j in range(len(visible), len(axes)):
+                axes[j].axis("off")
+
+            fig.tight_layout()
+            png_path = os.path.join(self.output_dir, f"{prefix}_results.png")
+            fig.savefig(png_path)
+            plt.close(fig)
+
+        print(f"Saved {csv_path}" + (f" and {png_path}" if visible else ""))
+        return self.output_dir

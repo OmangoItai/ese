@@ -202,7 +202,7 @@ from ese import Engine
 from core.entities import Order, OrderSide
 from core.market_intelligence import MarketIntelligence
 
-ese = Engine("config/default.yaml", "town_world.db")
+ese = Engine("config/default.yaml", "town_world.db", output_dir="./results/town")
 
 # --- 企业调度器：按 strategy_label 分发 ---
 @ese.firm
@@ -299,9 +299,7 @@ def price(supply, demand, config):
 
 # --- 运行 ---
 snapshots = ese.run(n_ticks=50)
-
-import pandas as pd
-pd.DataFrame(snapshots).to_csv("results.csv", index=False)
+ese.save(snapshots, prefix="town")
 ```
 
 每轮输出一个快照字典，包含 `tick`、`gini`、`engel`、`unemployment`、`active_firms`。
