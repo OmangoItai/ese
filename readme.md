@@ -2,7 +2,9 @@
 
 别打口水仗了，来 ese 模拟你的完美经济制度
 
-![](headup.png)
+<a href="https://github.com/OmangoItai/ese/blob/main/headup.png">
+  <img src="[图片链接.jpg](https://github.com/OmangoItai/ese/blob/main/headup.png)" width="300">
+</a>
 
 **ESE 是一个回合制经济沙盒。你定义初始世界、编写主体策略和分配规则，跑 N 轮，得到一个国家的经济演化数据。换个规则再跑一次，制度优劣直接从数据中显现。**
 
