@@ -1,14 +1,15 @@
 # examples/town_strategies.py
-from core.entities import Order
+from core.entities import Order, Firm, Household, Government
 from typing import Dict, List, Tuple
 from core.entities import Good
+from core.market_intelligence import MarketIntelligence
 
 
 # ---- 企业策略 ----
-def firm_strategy(obs: Dict, firm, goods: Dict[int, Good]) -> Dict:
+def firm_strategy(mi: MarketIntelligence, firm: Firm, goods: Dict[int, Good]) -> Dict:
     """农场生产食物，工坊生产工具。固定定价，固定产量，按需购买原料。"""
     result = {"new": [], "cancel": [], "update": []}
-    tick = obs["tick"]
+    tick = mi.tick
     food_id = 1
     tool_id = 2
 
@@ -95,10 +96,12 @@ def firm_strategy(obs: Dict, firm, goods: Dict[int, Good]) -> Dict:
 
 
 # ---- 家庭策略 ----
-def household_strategy(obs: Dict, hh, goods: Dict[int, Good]) -> Dict:
+def household_strategy(
+    mi: MarketIntelligence, hh: Household, goods: Dict[int, Good]
+) -> Dict:
     """家庭消费：70%收入买食物，30%买工具（若价格可接受）。"""
     result = {"new": [], "cancel": [], "update": []}
-    tick = obs["tick"]
+    tick = mi.tick
     food_id = 1
     tool_id = 2
 
@@ -148,14 +151,16 @@ def household_strategy(obs: Dict, hh, goods: Dict[int, Good]) -> Dict:
 
 
 # ---- 政府策略（简单征税并发放少量失业金） ----
-def government_strategy(obs: Dict, gov, goods: Dict[int, Good]) -> Dict:
+def government_strategy(
+    mi: MarketIntelligence, gov: Government, goods: Dict[int, Good]
+) -> Dict:
     # 本策略不主动创建订单，仅调整税率和失业金（已在种子中设定）
     return {"new": [], "cancel": [], "update": []}
 
 
 # ---- 分配策略（价格优先，同价则先到先得） ----
 def town_allocation(
-    obs: Dict,
+    mi: MarketIntelligence,
     supply_pool: List[Order],
     demand_pool: List[Order],
     goods: Dict[int, Good],
@@ -188,14 +193,14 @@ def town_allocation(
             qty = min(s.quantity, d.quantity)
             price = (s.price + d.price) / 2.0  # 折中价（或可改为s.price）
             matched_order = Order(
-                order_id=f"town_match_{s.good_id}_{s.seller_id}_{d.buyer_id}_{obs['tick']}_{len(matched)}",
+                order_id=f"town_match_{s.good_id}_{s.seller_id}_{d.buyer_id}_{mi.tick}_{len(matched)}",
                 seller_id=s.seller_id,
                 buyer_id=d.buyer_id,
                 good_id=s.good_id,
                 quantity=qty,
                 price=price,
                 order_type=s.order_type,
-                creation_tick=obs["tick"],
+                creation_tick=mi.tick,
             )
             matched.append(matched_order)
 
@@ -210,3 +215,6 @@ def town_allocation(
     remaining_supply = [o for i, o in enumerate(supply_pool) if i not in matched_sids]
     remaining_demand = [o for i, o in enumerate(demand_pool) if i not in matched_dids]
     return matched, remaining_supply, remaining_demand
+
+
+demo_allocation = town_allocation

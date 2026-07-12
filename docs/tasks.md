@@ -165,10 +165,88 @@
 
 ---
 
+## 7. obs 重构为 MarketIntelligence（宏观情报层）
+
+**产出**：`core/market_intelligence.py`、修改 `core/simulator.py`、修改所有策略文件
+
+**依据**：docs/update.md §4、docs/context.md（禁止上帝视角、统计局报表模拟）
+
+**动机**：
+
+- 当前 `obs` 字典传递的是**个体级裸数据**（all_firms/all_households 的完整快照 + 噪声），等同于上帝视野
+- 真实世界中，企业/政府决策依赖的是**统计机构汇总报表**和**公开市场情报**（GDP、CPI、行业均价、失业率），不存在个体级数据
+- 重构后将 `obs` 拆为两层：策略通过 `entity` 参数获取自身完整状态，通过 `MarketIntelligence` 获取宏观/中观聚合情报
+
+---
+
+### 7.1 新建 `MarketIntelligence` 数据结构
+
+- [x] 7.1.1 创建 `core/market_intelligence.py`
+- [x] 7.1.2 实现 `MarketIntelligence` dataclass，字段如下：
+
+| 字段 | 类型 | 来源 | 说明 |
+|------|------|------|------|
+| `tick` | `int` | `state.tick` | 当前周期 |
+| `gini` | `float` | Reporter.calc_gini | 基尼系数 |
+| `unemployment_rate` | `float` | Reporter.calc_unemployment | 失业率 |
+| `engel` | `float` | Reporter.calc_engel | 恩格尔系数 |
+| `sector_avg_price` | `Dict[int, float]` | 从 supply_pool 聚合 | 各 good_id 挂单均价 |
+| `sector_total_supply` | `Dict[int, float]` | 从 supply_pool 聚合 | 各 good_id 总挂单量 |
+| `sector_total_demand` | `Dict[int, float]` | 从 demand_pool 聚合 | 各 good_id 总询价量 |
+| `tax_rate` | `float` | Government.tax_rate | 税率 |
+| `unemployment_benefit` | `float` | Government.unemployment_benefit | 失业金 |
+| `active_firms` | `int` | 计数 | 活跃企业数 |
+
+> 暂不包含：`gdp`、`cpi`、`central_bank_rate`、`labor_income_share`、`sector_cr3`、`government_announcement`、`data_lag`、`reporting_bias`（依赖尚未实现的 MetricsCalculator 或央行实体，留待 P2 阶段补充）
+
+- [x] 7.1.3 为各 `sector_*` 字段添加 `InformationFriction` 噪声注入点（调用现有 `self.noise.apply_noise(value, noise_type, params)`）
+
+### 7.2 实现 `MarketIntelligenceBuilder`
+
+- [x] 7.2.1 在 `core/market_intelligence.py` 中实现 `MarketIntelligenceBuilder` 类
+- [x] 7.2.2 `__init__(self, noise, reporter, config)`：持有 noise 实例、reporter 实例、config 引用
+- [x] 7.2.3 `build(self, state, ledger)` 方法：从 `state` 收集原始数据 → 计算指标 → 加噪 → 返回 `MarketIntelligence` 实例
+- [x] 7.2.4 `_collect_raw(self, state, ledger)` 私有方法：遍历 `supply_pool`/`demand_pool` 聚合各 good_id 均价和总量；调 Reporter 算 gini/unemployment/engel
+- [x] 7.2.5 `_aggregate_pool(pool, agg)` 辅助方法：返回各 good 的均价（agg="avg"）或总量（agg="sum"）
+
+### 7.3 修改 `core/simulator.py`
+
+- [x] 7.3.1 在 `Simulator.__init__` 中初始化 `self.mi_builder = MarketIntelligenceBuilder(self.noise, self.reporter, self.config)`
+- [x] 7.3.2 删除 `_build_observations` 方法（不再构建个体级 obs 字典）
+- [x] 7.3.3 删除 `_agent_obs` 方法（不再需要 per-agent 观测视图）
+- [x] 7.3.4 tick() 步骤 9 改为 `self.mi = self.mi_builder.build(state, self.ledger)`（替换 `self.last_obs = self._build_observations(state)`）
+- [x] 7.3.5 修改 `_execute_strategy`：策略调用从 `strategy(agent_obs, entity, state.goods)` 改为 `strategy(mi, entity, state.goods)`；删除 `_agent_obs` 调用链
+- [x] 7.3.6 修改 `_execute_allocation`：分配调用从 `allocate_fn(obs, ...)` 改为 `allocate_fn(mi, ...)`
+
+**策略签名变更汇总：**
+
+| 插槽 | 旧签名 | 新签名 |
+|------|--------|--------|
+| firm | `(obs, firm, goods)` | `(mi, firm, goods)` |
+| household | `(obs, hh, goods)` | `(mi, hh, goods)` |
+| government | `(obs, gov, goods)` | `(mi, gov, goods)` |
+| allocation | `(obs, supply_pool, demand_pool, goods)` | `(mi, supply_pool, demand_pool, goods)` |
+
+### 7.4 迁移现有策略
+
+- [x] 7.4.1 修改 `examples/town_strategies.py`：所有策略函数 `obs` 参数改为 `mi`，`obs["tick"]` 改为 `mi.tick`，其余逻辑不变
+- [x] 7.4.2 修改 `examples/demo_strategies.py`（如存在）：N/A（文件不存在，现有策略仅 town_strategies.py）
+- [x] 7.4.3 检查策略中是否有依赖 `obs` 中已删除字段的逻辑——无，所有策略仅使用 `obs["tick"]`
+
+### 7.5 更新测试
+
+- [x] 7.5.1 修改 `core/simulator_test.py`：`TestBuildObservations` → `TestMarketIntelligence`；`TestObsNoise` → `TestMiNoise`；所有 obs 字典断言调整为 mi 字段断言
+- [x] 7.5.2 新增 `core/market_intelligence_test.py`：MI 测试内嵌于 `simulator_test.py` 的 `TestMarketIntelligence` 和 `TestMiNoise` 类中
+- [x] 7.5.3 验证：`python -m pytest core/simulator_test.py -v` **36/36 全绿**
+- [x] 7.5.4 验证：`python -m pytest core/ -v` **158/158 全绿**
+- [x] 7.5.5 端到端验证：`uv run python examples/generate_town.py && uv run python examples/town.py` → **正常跑完 50 tick，输出 CSV/图表**
+
+---
+
 ## 依赖关系
 
 ```
-1(entities) ─→ 2(ledger+noise) ─→ 3a(clearing part1) ─→ 3b(clearing part2) ─→ 4(reporter) ─→ 5(simulator kernel) ─→ 6(strategies)
+1(entities) ─→ 2(ledger+noise) ─→ 3a(clearing part1) ─→ 3b(clearing part2) ─→ 4(reporter) ─→ 5(simulator kernel) ─→ 6(strategies) ─→ 7(obs→MI refactor)
 ```
 
 每轮严格按顺序执行，前一轮全部打勾才进入下一轮。

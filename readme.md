@@ -7,11 +7,11 @@
 想象一个简单的经济循环：
 
 1. **每个 Tick 开始**，引擎先把上一轮匹配好的订单完成交付（一手交钱、一手交货），并把交不起货的标记为违约、该破产的破产。
-2. **企业执行策略**：根据当前库存、市价、员工情况，决定生产多少、定什么价、雇多少人，生成买卖订单。
-3. **家庭执行策略**：根据收入、储蓄、就业状态，决定买什么、找什么工作，生成订单。
-4. **政府执行策略**：根据税收，决定是否发福利、调整税率，生成订单。
+2. **企业执行策略**：接收 `MarketIntelligence`（下称 MI，统计局报表 + 公开市场情报），结合自身库存、现金、员工情况，决定生产、定价、买卖，生成订单。
+3. **家庭执行策略**：接收 MI，根据收入、储蓄、就业状态，决定消费，生成订单。
+4. **政府执行策略**：接收 MI，决定是否调整税率、发福利，生成订单。
 5. **分配策略匹配订单**：遍历供需池，把能对上的买卖单配对（按价格优先、按配额、按你写的任何规则）。
-6. **引擎再对"他人"的财务数据加噪声**（模拟现实中的信息不全），作为下一轮决策的依据。
+6. **引擎聚合全局数据并加噪声**（模拟统计局报表的误差），产出下一轮 MI。
 7. **记录本轮快照**（基尼系数、失业率等），进入下一个 Tick。
 
 循环往复。你编写的策略就是主体的"大脑"，通过替换策略来对比不同制度的效果。
@@ -41,6 +41,46 @@
 - 企业破产清算流程：拖欠工资 → 欠税 → 归零，清算后取消所有订单
 - 订单强制交付周期，不允许瞬时交付
 
+## MarketIntelligence（市场情报）：无上帝视野
+
+策略的第一个参数不再是包含所有对家资产负债表的 `obs` 字典，而是一个**统计局报表级别的聚合对象**——模拟真实世界中企业做决策时能看到的信息：国家统计局公告、央行利率、行业均价，而不是对家的库存和现金。
+
+| 字段 | 类型 | 说明 | 状态 |
+|------|------|------|------|
+| `tick` | `int` | 当前 Tick | ✅ |
+| `gini` | `float` | 基尼系数 | ✅ |
+| `unemployment_rate` | `float` | 失业率 | ✅ |
+| `engel` | `float` | 恩格尔系数 | ✅ |
+| `sector_avg_price` | `Dict[int, float]` | 各商品挂单均价 | ✅ |
+| `sector_total_supply` | `Dict[int, float]` | 各商品总供给量 | ✅ |
+| `sector_total_demand` | `Dict[int, float]` | 各商品总需求量 | ✅ |
+| `tax_rate` | `float` | 税率 | ✅ |
+| `unemployment_benefit` | `float` | 失业金标准 | ✅ |
+| `active_firms` | `int` | 活跃企业数 | ✅ |
+| `gdp` | `float` | GDP | ❌ P2 待实现 |
+| `cpi` | `float` | 消费者价格指数 | ❌ P2 待实现 |
+| `avg_wage` | `float` | 平均工资 | ❌ P2 待实现 |
+| `labor_income_share` | `float` | 劳动收入占比 | ❌ P2 待实现 |
+| `sector_cr3` | `Dict[int, float]` | 行业集中度 CR3 | ❌ P2 待实现 |
+| `sector_inventory_ratio` | `Dict[int, float]` | 库存/产能比 | ❌ P2 待实现 |
+| `central_bank_rate` | `float` | 基准利率 | ❌ 无央行 |
+| `government_announcement` | `Optional[str]` | 政府指导价/配额公告 | ❌ 待设计 |
+
+> **设计理念：** 所有 `✅` 字段经 `InformationFriction` 加噪后注入，模拟统计局有偏公告或公开市场情报失真。计划经济和市场经济的唯一区别在于 `noise_type` 配置（计划 = `none`，市场 = `gaussian`）。策略函数不再能遍历 `all_firms` 获取对家电库数据——只能像真实企业一样，从宏观报表和行业均价中推断市场状态。
+
+策略函数签名示例：
+
+```python
+from core.market_intelligence import MarketIntelligence
+
+def firm_strategy(mi: MarketIntelligence, firm: Firm, goods: Dict[int, Good]) -> Dict:
+    # 用统计局报表做决策
+    if mi.gini > 0.4:
+        ...
+    sector_price = mi.sector_avg_price.get(good_id, default_price)
+    ...
+```
+
 ---
 
 ## 快速开始
@@ -69,30 +109,31 @@ order_expire_ticks: 30
 
 ### 4. 编写策略
 
-编写策略函数并注册到 Registry（参考 `examples/demo_strategies.py`）：
+编写策略函数并注册到 Registry（参考 `examples/town_strategies.py`）。所有策略接收的第一个参数是 `MarketIntelligence`（聚合宏观情报），第二参数是主体自身（完整状态，无噪声）：
 
-| 策略插槽 | 职责 |
-|---|---|
-| FirmStrategy | 企业定价、生产、投资 |
-| HouseholdStrategy | 家庭消费、劳动力供给 |
-| GovernmentStrategy | 征税、发放福利 |
-| AllocationPolicy | 匹配买卖订单（**制度灵魂**：按价格优先→市场；按配额→计划） |
+| 策略插槽 | 签名 | 职责 |
+|---|---|---|
+| FirmStrategy | `(mi, firm, goods)` | 企业定价、生产、投资 |
+| HouseholdStrategy | `(mi, hh, goods)` | 家庭消费 |
+| GovernmentStrategy | `(mi, gov, goods)` | 征税、发放福利 |
+| AllocationPolicy | `(mi, supply_pool, demand_pool, goods)` | 匹配买卖订单（**制度灵魂**：按价格优先→市场；按配额→计划） |
 
 ### 5. 运行实验
 
 ```python
 from core.simulator import Simulator
 from core.registry import Registry
-import examples.demo_strategies as demo
+import examples.town_strategies as town
 
 reg = Registry()
-reg.register("firm", demo.firm_strategy)
-reg.register("household", demo.household_strategy)
-reg.register("allocation", demo.demo_allocation)
+reg.register("firm", town.firm_strategy)
+reg.register("household", town.household_strategy)
+reg.register("government", town.government_strategy)
+reg.register("allocation", town.town_allocation)
 
-sim = Simulator("config/default.yaml", "seed_world.db")
+sim = Simulator("config/default.yaml", "town_world.db")
 sim.set_registry(reg)
-snapshots = sim.run(n_ticks=30)
+snapshots = sim.run(n_ticks=50)
 
 import pandas as pd
 pd.DataFrame(snapshots).to_csv("results.csv", index=False)
@@ -102,18 +143,25 @@ pd.DataFrame(snapshots).to_csv("results.csv", index=False)
 
 ## 输出指标
 
+**Snapshot（每 Tick 返回，由 `Reporter.snapshot()` 生成）：**
+
 | 字段 | 含义 |
 |---|---|
+| `tick` | Tick 序号 |
 | `gini` | 基尼系数（贫富差距） |
 | `engel` | 恩格尔系数（食品支出占比） |
 | `unemployment` | 失业率 |
 | `active_firms` | 活跃企业数 |
 
+**MarketIntelligence（每 Tick 构建，注入策略，含噪声）：**
+
+见上方 [MarketIntelligence](#marketintelligence-市场情报无上帝视野) 表格。
+
 ## FAQ
 
 **Q：为什么没有内置投入产出表？**
 
-A：实验者的策略只能通过 Ledger 历史交易数据，和带噪声的 Observation（obs）观测数据（企业和家庭上报的数据）自行推断，模拟现实中统计局的估计误差。
+A：实验者的策略不能直接访问全局的投入产出矩阵（A 矩阵）——那是上帝视野。策略只能从 MI（MarketIntelligence）提供的**统计局汇总报表**（行业均价、供给总量、基尼系数等，已加噪）来自行推断经济结构。这是本项目与那篇 2026 年论文最根本的差异：计划委员会也必须为估算误差付出代价。
 
 **Q：货币总量为何恒定？**
 

@@ -1,5 +1,4 @@
 import sqlite3
-from copy import deepcopy
 from typing import Dict, List
 
 import yaml
@@ -7,6 +6,7 @@ import yaml
 from core.clearing_house import ClearingHouse
 from core.entities import Firm, Good, Government, Household, Order, WorldState
 from core.ledger import Ledger
+from core.market_intelligence import MarketIntelligence, MarketIntelligenceBuilder
 from core.noise import InformationFriction
 from core.reporter import Reporter
 from core.registry import Registry
@@ -27,7 +27,10 @@ class Simulator:
         self.reporter = Reporter()
         self.state = self._load_world(world_db_path)
         self.order_expire_ticks = self.config.get("order_expire_ticks", 30)
-        self.last_obs = self._build_observations(self.state)
+        self.mi_builder = MarketIntelligenceBuilder(
+            self.noise, self.reporter, self.config
+        )
+        self.mi = self.mi_builder.build(self.state, self.ledger)
         self.registry = Registry()
 
     def set_registry(self, registry: "Registry") -> None:
@@ -169,10 +172,10 @@ class Simulator:
         self._disburse_unemployment(state)
 
         # 5. Strategy：用户策略 → new/cancel/update → validate → freeze → 入池
-        self._execute_strategy(self.last_obs, state)
+        self._execute_strategy(self.mi, state)
 
         # 6. Allocation：用户分配策略 → 从池中配对 → ALLOCATED → 入 pending_orders
-        self._execute_allocation(self.last_obs, state)
+        self._execute_allocation(self.mi, state)
 
         # 7. 池维护：过期订单释放抵押品
         self.clearing.expire_stale_orders(state, self.order_expire_ticks)
@@ -181,8 +184,8 @@ class Simulator:
         self._end_tick_for_all(state)
         state.tick += 1
 
-        # 9. 构建观测数据（含噪声），缓存供下一 Tick 使用
-        self.last_obs = self._build_observations(state)
+        # 9. 构建 MarketIntelligence（含噪声），缓存供下一 Tick 使用
+        self.mi = self.mi_builder.build(state, self.ledger)
 
         return state
 
@@ -247,54 +250,39 @@ class Simulator:
                     gov.cash -= amount
                     hh.cash += amount
 
-    def _execute_strategy(self, obs: Dict, state: WorldState) -> None:
+    def _execute_strategy(self, mi: MarketIntelligence, state: WorldState) -> None:
         for firm in state.firms.values():
             if not firm.is_active:
                 continue
             strategy = self.registry.get("firm")
             if strategy is None:
                 continue
-            agent_obs = self._agent_obs(obs, state, firm.id, "firm")
             self._dispatch_agent_result(
-                agent_obs,
                 state,
-                firm.id,
-                "firm",
-                strategy(agent_obs, firm, state.goods),
+                strategy(mi, firm, state.goods),
             )
 
         for hh in state.households.values():
             strategy = self.registry.get("household")
             if strategy is None:
                 continue
-            agent_obs = self._agent_obs(obs, state, hh.id, "household")
             self._dispatch_agent_result(
-                agent_obs,
                 state,
-                hh.id,
-                "household",
-                strategy(agent_obs, hh, state.goods),
+                strategy(mi, hh, state.goods),
             )
 
         for gov in state.governments.values():
             strategy = self.registry.get("government")
             if strategy is None:
                 continue
-            agent_obs = self._agent_obs(obs, state, gov.id, "government")
             self._dispatch_agent_result(
-                agent_obs,
                 state,
-                gov.id,
-                "government",
-                strategy(agent_obs, gov, state.goods),
+                strategy(mi, gov, state.goods),
             )
 
     def _dispatch_agent_result(
         self,
-        agent_obs: Dict,
         state: WorldState,
-        entity_id: int,
-        role: str,
         result: Dict,
     ) -> None:
         if not isinstance(result, dict):
@@ -350,13 +338,13 @@ class Simulator:
         if order in state.demand_pool:
             state.demand_pool.remove(order)
 
-    def _execute_allocation(self, obs: Dict, state: WorldState) -> None:
+    def _execute_allocation(self, mi: MarketIntelligence, state: WorldState) -> None:
         allocate_fn = self.registry.get("allocation")
         if allocate_fn is None:
             return
 
         matched, remaining_supply, remaining_demand = allocate_fn(
-            obs, list(state.supply_pool), list(state.demand_pool), state.goods
+            mi, list(state.supply_pool), list(state.demand_pool), state.goods
         )
 
         state.supply_pool = remaining_supply
@@ -375,66 +363,3 @@ class Simulator:
         for hh in state.households.values():
             if not hh.is_employed:
                 hh.unemployment_ticks += 1
-
-    def _build_observations(self, state: WorldState) -> Dict:
-        noise_type = self.config.get("noise_type", "none")
-        noise_params = self.config.get("noise_params", {})
-
-        all_firms = [deepcopy(f) for f in state.firms.values() if f.is_active]
-        all_households = [deepcopy(h) for h in state.households.values()]
-        governments_list = [deepcopy(g) for g in state.governments.values()]
-
-        for f in all_firms:
-            f.cash = self.noise.apply_noise(float(f.cash), noise_type, noise_params)
-            f.collateral = self.noise.apply_noise(
-                float(f.collateral), noise_type, noise_params
-            )
-
-        for h in all_households:
-            h.cash = self.noise.apply_noise(float(h.cash), noise_type, noise_params)
-
-        for g in governments_list:
-            g.cash = self.noise.apply_noise(float(g.cash), noise_type, noise_params)
-
-        return {
-            "all_firms": all_firms,
-            "all_households": all_households,
-            "governments": governments_list,
-            "tick": state.tick,
-            "_firms_map": state.firms,
-            "_households_map": state.households,
-            "_governments_map": state.governments,
-        }
-
-    def _agent_obs(
-        self, shared_obs: Dict, state: WorldState, agent_id: int, role: str
-    ) -> Dict:
-        entity = None
-        if role == "firm":
-            entity = state.firms.get(agent_id)
-        elif role == "household":
-            entity = state.households.get(agent_id)
-        elif role == "government":
-            entity = state.governments.get(agent_id)
-
-        my_supply = [
-            o
-            for o in state.supply_pool
-            if (o.seller_id == agent_id or o.buyer_id == agent_id)
-        ]
-        my_demand = [
-            o
-            for o in state.demand_pool
-            if (o.seller_id == agent_id or o.buyer_id == agent_id)
-        ]
-
-        return {
-            "my_id": agent_id,
-            "my_state": deepcopy(entity) if entity is not None else None,
-            "my_supply_orders": my_supply,
-            "my_demand_orders": my_demand,
-            "all_firms": shared_obs["all_firms"],
-            "all_households": shared_obs["all_households"],
-            "governments": shared_obs["governments"],
-            "tick": shared_obs["tick"],
-        }
