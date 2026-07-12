@@ -182,7 +182,7 @@ uv sync
 uv run python examples/generate_town.py
 ```
 
-生成 `town_world.db`：2 种商品（food、tool）、2 家企业（农场、工坊）、10 个家庭、1 个政府。会同步到 `config/seed_world.db`。
+生成 `examples/town_world.db`：2 种商品（food、tool）、2 家企业（农场、工坊）、10 个家庭、1 个政府。
 
 ### 4.3 配置参数（`config/default.yaml`）
 
@@ -198,11 +198,9 @@ order_expire_ticks: 30
 完整的参考实现见 `examples/town.py`。下面是一个自包含的最简示例（2 种商品、一家做食物的农场和一家做工具的工坊）：
 
 ```python
-from ese import Engine
-from core.entities import Order, OrderSide
-from core.market_intelligence import MarketIntelligence
+from ese import Engine, MarketIntelligence, Order, OrderSide
 
-ese = Engine("config/default.yaml", "town_world.db", output_dir="./results/town")
+ese = Engine("config/default.yaml", "examples/town_world.db", output_dir="./examples/results")
 
 # --- 企业调度器：按 strategy_label 分发 ---
 @ese.firm

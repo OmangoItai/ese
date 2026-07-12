@@ -1,5 +1,13 @@
 from core.engine import Engine
-from core.entities import Firm, Good, Government, Household, Order, WorldState
+from core.entities import (
+    Firm,
+    Good,
+    Government,
+    Household,
+    Order,
+    OrderSide,
+    WorldState,
+)
 from core.market_intelligence import MarketIntelligence
 
 __all__ = [
@@ -9,6 +17,7 @@ __all__ = [
     "Government",
     "Household",
     "Order",
+    "OrderSide",
     "WorldState",
     "MarketIntelligence",
 ]

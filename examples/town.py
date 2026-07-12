@@ -5,14 +5,23 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from typing import Dict, Tuple, List
 
-from ese import Engine
-from core.entities import Order, Firm, Good, Government, Household, OrderSide
-from core.market_intelligence import MarketIntelligence
+from ese import (
+    Engine,
+    Firm,
+    Good,
+    Government,
+    Household,
+    MarketIntelligence,
+    Order,
+    OrderSide,
+)
 # ============================================================
 # 初始化引擎
 # ============================================================
 
-ese = Engine("config/default.yaml", "town_world.db", output_dir="./examples/results")
+ese = Engine(
+    "config/default.yaml", "examples/town_world.db", output_dir="./examples/results"
+)
 
 # ============================================================
 # 企业策略
