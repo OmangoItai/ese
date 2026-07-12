@@ -840,7 +840,7 @@ def _make_one_firm_one_hh_db() -> str:
     )
 
 
-def _firm_strategy_for_test(mi, firm, goods):
+def _firm_strategy_for_test(mi, firm, goods, orders):
     """兼容测试用：firm 101+102 的合并策略，替代已删除的 examples.town.firm_strategy"""
     result = {"new": [], "cancel": [], "update": []}
     tick = mi.tick

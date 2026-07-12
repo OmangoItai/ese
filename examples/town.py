@@ -23,13 +23,15 @@ ese = Engine("config/default.yaml", "town_world.db")
 
 
 @ese.firm
-def firm_orchestrator(mi: MarketIntelligence, firm: Firm, goods: Dict[int, Good]):
+def firm_orchestrator(
+    mi: MarketIntelligence, firm: Firm, goods: Dict[int, Good], orders
+):
     """调度器：按 strategy_label 分发到标签策略"""
-    return ese.firm.use(firm.strategy_label, mi, firm, goods)
+    return ese.firm.use(firm.strategy_label, mi, firm, goods, orders)
 
 
 @ese.firm.label("farm")
-def farm_strategy(mi: MarketIntelligence, firm: Firm, goods: Dict[int, Good]):
+def farm_strategy(mi: MarketIntelligence, firm: Firm, goods: Dict[int, Good], orders):
     """农场：消耗工具 → 产出食物 → 卖食物、买工具"""
     result = {"new": [], "cancel": [], "update": []}
     tick = mi.tick
@@ -78,7 +80,9 @@ def farm_strategy(mi: MarketIntelligence, firm: Firm, goods: Dict[int, Good]):
 
 
 @ese.firm.label("workshop")
-def workshop_strategy(mi: MarketIntelligence, firm: Firm, goods: Dict[int, Good]):
+def workshop_strategy(
+    mi: MarketIntelligence, firm: Firm, goods: Dict[int, Good], orders
+):
     """工坊：消耗食物 → 产出工具 → 卖工具、买食物"""
     result = {"new": [], "cancel": [], "update": []}
     tick = mi.tick
@@ -132,7 +136,9 @@ def workshop_strategy(mi: MarketIntelligence, firm: Firm, goods: Dict[int, Good]
 
 
 @ese.household
-def household_strategy(mi: MarketIntelligence, hh: Household, goods: Dict[int, Good]):
+def household_strategy(
+    mi: MarketIntelligence, hh: Household, goods: Dict[int, Good], orders
+):
     """家庭消费：每 tick 拿 20% 现金买东西，70% 买食物、30% 买工具"""
     result = {"new": [], "cancel": [], "update": []}
     tick = mi.tick
@@ -187,7 +193,7 @@ def household_strategy(mi: MarketIntelligence, hh: Household, goods: Dict[int, G
 
 @ese.government
 def government_strategy(
-    mi: MarketIntelligence, gov: Government, goods: Dict[int, Good]
+    mi: MarketIntelligence, gov: Government, goods: Dict[int, Good], orders
 ):
     """税率和失业金在种子数据库中已设定，这里不做额外操作"""
     return {"new": [], "cancel": [], "update": []}

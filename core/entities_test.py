@@ -93,7 +93,7 @@ class TestFirm:
         assert f.collateral == 0.0
         assert f.is_active is True
         assert f.employees == []
-        assert f.active_order_ids == set()
+        assert f.outstanding_order_ids == set()
 
     def test_fulfillment_log_initial(self):
         f = Firm(id=1, cash=1000.0)
@@ -116,11 +116,11 @@ class TestFirm:
             collateral=300.0,
             is_active=False,
             employees=[10, 11],
-            active_order_ids={"o1", "o2"},
+            outstanding_order_ids={"o1", "o2"},
         )
         assert f.inventory == {1: 100.0, 2: 50.0}
         assert f.employees == [10, 11]
-        assert f.active_order_ids == {"o1", "o2"}
+        assert f.outstanding_order_ids == {"o1", "o2"}
         assert f.is_active is False
 
 

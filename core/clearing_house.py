@@ -126,8 +126,8 @@ class ClearingHouse:
             seller_freeze = order_value * seller_ratio
             seller.cash -= seller_freeze
             state.collateral_pool[f"{order.order_id}_seller"] = seller_freeze
-            if isinstance(seller, Firm):
-                seller.active_order_ids.add(order.order_id)
+            if isinstance(seller, (Firm, Household, Government)):
+                seller.outstanding_order_ids.add(order.order_id)
         else:
             state.collateral_pool[f"{order.order_id}_seller"] = 0.0
 
@@ -136,8 +136,8 @@ class ClearingHouse:
             buyer_freeze = order_value * buyer_ratio
             buyer.cash -= buyer_freeze
             state.collateral_pool[f"{order.order_id}_buyer"] = buyer_freeze
-            if isinstance(buyer, Firm):
-                buyer.active_order_ids.add(order.order_id)
+            if isinstance(buyer, (Firm, Household, Government)):
+                buyer.outstanding_order_ids.add(order.order_id)
         else:
             state.collateral_pool[f"{order.order_id}_buyer"] = 0.0
 
@@ -153,12 +153,12 @@ class ClearingHouse:
 
         if seller:
             seller.cash += seller_freeze
-            if isinstance(seller, Firm):
-                seller.active_order_ids.discard(order.order_id)
+            if isinstance(seller, (Firm, Household, Government)):
+                seller.outstanding_order_ids.discard(order.order_id)
         if buyer:
             buyer.cash += buyer_freeze
-            if isinstance(buyer, Firm):
-                buyer.active_order_ids.discard(order.order_id)
+            if isinstance(buyer, (Firm, Household, Government)):
+                buyer.outstanding_order_ids.discard(order.order_id)
 
     def forfeit_collateral(
         self, state: WorldState, order: Order, defaulting_side: str
@@ -175,17 +175,17 @@ class ClearingHouse:
         if defaulting_side == "seller":
             if buyer:
                 buyer.cash += buyer_freeze + seller_freeze
-                if isinstance(buyer, Firm):
-                    buyer.active_order_ids.discard(order.order_id)
-            if seller and isinstance(seller, Firm):
-                seller.active_order_ids.discard(order.order_id)
+                if isinstance(buyer, (Firm, Household, Government)):
+                    buyer.outstanding_order_ids.discard(order.order_id)
+            if seller and isinstance(seller, (Firm, Household, Government)):
+                seller.outstanding_order_ids.discard(order.order_id)
         else:
             if seller:
                 seller.cash += seller_freeze + buyer_freeze
-                if isinstance(seller, Firm):
-                    seller.active_order_ids.discard(order.order_id)
-            if buyer and isinstance(buyer, Firm):
-                buyer.active_order_ids.discard(order.order_id)
+                if isinstance(seller, (Firm, Household, Government)):
+                    seller.outstanding_order_ids.discard(order.order_id)
+            if buyer and isinstance(buyer, (Firm, Household, Government)):
+                buyer.outstanding_order_ids.discard(order.order_id)
 
     # ———— Price tracking ————
 
@@ -260,10 +260,10 @@ class ClearingHouse:
             order.status = "FULFILLED"
             self.ledger.record_trade(order)
 
-            if isinstance(buyer, Firm):
-                buyer.active_order_ids.discard(order.order_id)
-            if isinstance(seller, Firm):
-                seller.active_order_ids.discard(order.order_id)
+            if isinstance(buyer, (Firm, Household, Government)):
+                buyer.outstanding_order_ids.discard(order.order_id)
+            if isinstance(seller, (Firm, Household, Government)):
+                seller.outstanding_order_ids.discard(order.order_id)
 
             liquidated = self._check_liquidation(state, buyer)
             if liquidated:
@@ -285,10 +285,10 @@ class ClearingHouse:
             order.status = "DEFAULTED"
             self.ledger.record_trade(order)
 
-            if isinstance(seller, Firm):
-                seller.active_order_ids.discard(order.order_id)
-            if isinstance(buyer, Firm):
-                buyer.active_order_ids.discard(order.order_id)
+            if isinstance(seller, (Firm, Household, Government)):
+                seller.outstanding_order_ids.discard(order.order_id)
+            if isinstance(buyer, (Firm, Household, Government)):
+                buyer.outstanding_order_ids.discard(order.order_id)
 
             liquidated = False
             if defaulting_side == "seller" and isinstance(seller, Firm):
@@ -332,8 +332,8 @@ class ClearingHouse:
         order.status = "FULFILLED"
         self.ledger.record_trade(order)
 
-        if isinstance(buyer, Firm):
-            buyer.active_order_ids.discard(order.order_id)
+        if isinstance(buyer, (Firm, Household, Government)):
+            buyer.outstanding_order_ids.discard(order.order_id)
 
         return True, "FULFILLED (labor)", False
 
@@ -422,7 +422,7 @@ class ClearingHouse:
                 order.status = "DEFAULTED"
                 self.ledger.record_trade(order)
                 if firm:
-                    firm.active_order_ids.discard(order.order_id)
+                    firm.outstanding_order_ids.discard(order.order_id)
 
     # ———— Liquidation ————
 
@@ -481,10 +481,10 @@ class ClearingHouse:
 
         # (d) Recover firm's frozen collateral → firm.cash
         firm_frozen_total = 0.0
-        for oid in list(firm.active_order_ids):
+        for oid in list(firm.outstanding_order_ids):
             order = state.all_orders.get(oid)
             if order is None:
-                firm.active_order_ids.discard(oid)
+                firm.outstanding_order_ids.discard(oid)
                 continue
             frozen_key = (
                 f"{oid}_seller" if order.seller_id == firm_id else f"{oid}_buyer"
@@ -531,10 +531,10 @@ class ClearingHouse:
         firm.employees.clear()
 
         # (e) & (f) Clean up counterparty orders
-        for oid in list(firm.active_order_ids):
+        for oid in list(firm.outstanding_order_ids):
             order = state.all_orders.get(oid)
             if order is None:
-                firm.active_order_ids.discard(oid)
+                firm.outstanding_order_ids.discard(oid)
                 continue
 
             if order.status == "OPEN":
@@ -553,7 +553,7 @@ class ClearingHouse:
                     state.pending_orders.remove(order)
                 self.ledger.record_trade(order)
 
-            firm.active_order_ids.discard(oid)
+            firm.outstanding_order_ids.discard(oid)
 
         # (g) Deactivate
         firm.is_active = False
@@ -575,8 +575,8 @@ class ClearingHouse:
         counterparty = self._get_entity(state, counterparty_id)
         if counterparty:
             counterparty.cash += frozen
-            if isinstance(counterparty, Firm):
-                counterparty.active_order_ids.discard(order.order_id)
+            if isinstance(counterparty, (Firm, Household, Government)):
+                counterparty.outstanding_order_ids.discard(order.order_id)
 
     # ———— Pool expiration ————
 

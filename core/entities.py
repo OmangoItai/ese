@@ -41,11 +41,18 @@ class Firm:
     collateral: float = 0.0  # 自有资产净值（冻结金在 WorldState.collateral_pool）
     is_active: bool = True
     employees: List[int] = field(default_factory=list)
-    active_order_ids: Set[str] = field(default_factory=set)  # OPEN/ALLOCATED 状态订单
+    outstanding_order_ids: Set[str] = field(default_factory=set)
     strategy_label: str = "default"
     _fulfillment_log: deque[Tuple[int, int, int]] = field(
         default_factory=lambda: deque(maxlen=30)
     )  # (fulfilled, defaulted, tick) 按 Tick 聚合，maxlen=30 常数内存
+
+    def outstanding_orders(self, order_book: dict) -> list:
+        return [
+            order_book[oid]
+            for oid in self.outstanding_order_ids
+            if order_book.get(oid) and order_book[oid].status in ("OPEN", "ALLOCATED")
+        ]
 
 
 @dataclass
@@ -57,10 +64,18 @@ class Household:
     is_employed: bool = False
     employer_firm_id: Optional[int] = None
     unemployment_ticks: int = 0
+    outstanding_order_ids: Set[str] = field(default_factory=set)
     strategy_label: str = "default"
     _fulfillment_log: deque[Tuple[int, int, int]] = field(
         default_factory=lambda: deque(maxlen=30)
     )  # (fulfilled, defaulted, tick) 按 Tick 聚合，maxlen=30 常数内存
+
+    def outstanding_orders(self, order_book: dict) -> list:
+        return [
+            order_book[oid]
+            for oid in self.outstanding_order_ids
+            if order_book.get(oid) and order_book[oid].status in ("OPEN", "ALLOCATED")
+        ]
 
 
 @dataclass
@@ -70,10 +85,18 @@ class Government:
     tax_rate: float = 0.0
     money_supply: float = 0.0  # 预留，当前版本不启用
     unemployment_benefit: float = 0.0
+    outstanding_order_ids: Set[str] = field(default_factory=set)
     strategy_label: str = "default"
     _fulfillment_log: deque[Tuple[int, int, int]] = field(
         default_factory=lambda: deque(maxlen=30)
     )  # (fulfilled, defaulted, tick) 按 Tick 聚合，maxlen=30 常数内存（未来功能预留）
+
+    def outstanding_orders(self, order_book: dict) -> list:
+        return [
+            order_book[oid]
+            for oid in self.outstanding_order_ids
+            if order_book.get(oid) and order_book[oid].status in ("OPEN", "ALLOCATED")
+        ]
 
 
 @dataclass

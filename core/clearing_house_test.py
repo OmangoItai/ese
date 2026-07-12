@@ -252,12 +252,12 @@ class TestFreezeRelease:
         assert f1.cash == 5000.0 - ws.collateral_pool["o1_seller"]
         assert f2.cash == 5000.0 - ws.collateral_pool["o1_buyer"]
 
-    def test_freeze_adds_active_order_ids(self):
+    def test_freeze_adds_outstanding_order_ids(self):
         ws, f1, f2 = self._make_ws_with_two_firms()
         order = _make_order("o1", 1, 2, 3, quantity=10.0, price=5.0)
         self.ch.freeze_collateral(ws, order)
-        assert "o1" in f1.active_order_ids
-        assert "o1" in f2.active_order_ids
+        assert "o1" in f1.outstanding_order_ids
+        assert "o1" in f2.outstanding_order_ids
 
     def test_release_restores_cash_and_removes_from_pool(self):
         ws, f1, f2 = self._make_ws_with_two_firms()
@@ -270,13 +270,13 @@ class TestFreezeRelease:
         assert f1.cash == 5000.0
         assert f2.cash == 5000.0
 
-    def test_release_removes_active_order_ids(self):
+    def test_release_removes_outstanding_order_ids(self):
         ws, f1, f2 = self._make_ws_with_two_firms()
         order = _make_order("o1", 1, 2, 3, quantity=10.0, price=5.0)
         self.ch.freeze_collateral(ws, order)
         self.ch.release_collateral(ws, order)
-        assert "o1" not in f1.active_order_ids
-        assert "o1" not in f2.active_order_ids
+        assert "o1" not in f1.outstanding_order_ids
+        assert "o1" not in f2.outstanding_order_ids
 
     def test_freeze_with_dynamic_ratio(self):
         ws, f1, f2 = self._make_ws_with_two_firms()
@@ -319,8 +319,8 @@ class TestForfeitCollateral:
         assert len(ws.collateral_pool) == 0
         assert f1.cash == cash1_after_freeze
         assert f2.cash == cash2_after_freeze + buyer_frozen + seller_frozen
-        assert "o1" not in f1.active_order_ids
-        assert "o1" not in f2.active_order_ids
+        assert "o1" not in f1.outstanding_order_ids
+        assert "o1" not in f2.outstanding_order_ids
 
     def test_forfeit_buyer_side(self):
         ws, f1, f2 = self._make_ws()
@@ -338,8 +338,8 @@ class TestForfeitCollateral:
         assert len(ws.collateral_pool) == 0
         assert f2.cash == cash2_after_freeze
         assert f1.cash == cash1_after_freeze + seller_frozen + buyer_frozen
-        assert "o1" not in f1.active_order_ids
-        assert "o1" not in f2.active_order_ids
+        assert "o1" not in f1.outstanding_order_ids
+        assert "o1" not in f2.outstanding_order_ids
 
 
 class TestPriceTracking:

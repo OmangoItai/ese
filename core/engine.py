@@ -22,7 +22,7 @@ class _Slot:
 
         return decorator
 
-    def use(self, label: str, mi, entity, goods):
+    def use(self, label: str, mi, entity, goods, orders):
         strategy = self._reg.get(self._name, label)
         if strategy is None:
             warnings.warn(
@@ -31,7 +31,7 @@ class _Slot:
                 RuntimeWarning,
             )
             return {"new": [], "cancel": [], "update": []}
-        return strategy(mi, entity, goods)
+        return strategy(mi, entity, goods, orders)
 
 
 class _AllocationSlot(_Slot):

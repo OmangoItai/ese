@@ -277,25 +277,28 @@ class Simulator:
             for firm in state.firms.values():
                 if not firm.is_active:
                     continue
+                my_orders = firm.outstanding_orders(state.all_orders)
                 self._dispatch_agent_result(
                     state,
-                    firm_fn(mi, firm, state.goods),
+                    firm_fn(mi, firm, state.goods, my_orders),
                 )
 
         hh_fn = self._reg.get("household") if self._reg else None
         if hh_fn is not None:
             for hh in state.households.values():
+                my_orders = hh.outstanding_orders(state.all_orders)
                 self._dispatch_agent_result(
                     state,
-                    hh_fn(mi, hh, state.goods),
+                    hh_fn(mi, hh, state.goods, my_orders),
                 )
 
         gov_fn = self._reg.get("government") if self._reg else None
         if gov_fn is not None:
             for gov in state.governments.values():
+                my_orders = gov.outstanding_orders(state.all_orders)
                 self._dispatch_agent_result(
                     state,
-                    gov_fn(mi, gov, state.goods),
+                    gov_fn(mi, gov, state.goods, my_orders),
                 )
 
     def _dispatch_agent_result(
