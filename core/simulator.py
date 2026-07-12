@@ -135,8 +135,7 @@ class Simulator:
             if overlap:
                 raise ValueError(
                     f"Firm and Household ID collision: {overlap}. "
-                    "All entity IDs must be globally unique (e.g., firms: 1-99, "
-                    "households: 101-199, governments: 201+)."
+                    "All entity(Household, Firm, Government) IDs must be globally unique."
                 )
 
             return WorldState(

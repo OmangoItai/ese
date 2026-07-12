@@ -812,7 +812,7 @@ class TestStrategyRegistry:
 
 class TestFirmDemoStrategy:
     def test_firm_demo_grows_supply_pool(self):
-        from examples.demo_strategies import firm_strategy
+        from examples.town_strategies import firm_strategy
         from core.registry import Registry
 
         db_path = _make_one_firm_one_hh_db()
@@ -838,7 +838,7 @@ class TestFirmDemoStrategy:
             os.unlink(config_path)
 
     def test_firm_demo_buy_raw_material_grows_demand_pool(self):
-        from examples.demo_strategies import firm_strategy
+        from examples.town_strategies import firm_strategy
         from core.registry import Registry
 
         db_path = _make_one_firm_one_hh_db()
@@ -865,7 +865,7 @@ class TestFirmDemoStrategy:
 
 class TestHouseholdDemoStrategy:
     def test_household_demo_grows_demand_pool(self):
-        from examples.demo_strategies import household_strategy
+        from examples.town_strategies import household_strategy
         from core.registry import Registry
 
         db_path = _make_one_firm_one_hh_db()
@@ -893,7 +893,7 @@ class TestHouseholdDemoStrategy:
 
 class TestAllocationPolicy:
     def test_allocation_creates_matched_orders(self):
-        from examples.demo_strategies import (
+        from examples.town_strategies import (
             firm_strategy,
             household_strategy,
             demo_allocation,
@@ -926,7 +926,7 @@ class TestAllocationPolicy:
             os.unlink(config_path)
 
     def test_allocation_price_lowest_supply_first(self):
-        from examples.demo_strategies import demo_allocation
+        from examples.town_strategies import demo_allocation
 
         db_path = _make_one_firm_one_hh_db()
         config_path = _make_temp_config({"noise_type": "none"})
@@ -992,7 +992,7 @@ class TestAllocationPolicy:
 
 class TestFullTickPipeline:
     def test_full_tick_inventory_transfer(self):
-        from examples.demo_strategies import (
+        from examples.town_strategies import (
             firm_strategy,
             household_strategy,
             demo_allocation,
@@ -1041,7 +1041,7 @@ class TestFullTickPipeline:
             os.unlink(config_path)
 
     def test_government_strategy_does_nothing(self):
-        from examples.demo_strategies import government_strategy
+        from examples.town_strategies import government_strategy
         from core.registry import Registry
 
         db_path = _make_one_firm_one_hh_db()
@@ -1065,7 +1065,7 @@ class TestFullTickPipeline:
 
 class TestObsNoise:
     def test_agent_obs_my_state_noiseless(self):
-        from examples.demo_strategies import firm_strategy
+        from examples.town_strategies import firm_strategy
         from core.registry import Registry
 
         db_path = _make_one_firm_one_hh_db()
@@ -1097,7 +1097,7 @@ class TestObsNoise:
             os.unlink(config_path)
 
     def test_agent_obs_none_noise_identical(self):
-        from examples.demo_strategies import firm_strategy
+        from examples.town_strategies import firm_strategy
         from core.registry import Registry
 
         db_path = _make_one_firm_one_hh_db()
@@ -1117,7 +1117,7 @@ class TestObsNoise:
             os.unlink(config_path)
 
     def test_agent_obs_includes_pool_orders(self):
-        from examples.demo_strategies import firm_strategy
+        from examples.town_strategies import firm_strategy
         from core.registry import Registry
 
         db_path = _make_one_firm_one_hh_db()
