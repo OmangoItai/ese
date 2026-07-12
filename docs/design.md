@@ -24,9 +24,8 @@ ese/
 │   ├── simulator.py          # 主循环
 │   └── ledger.py             # 历史账本
 ├── examples/                # 示例策略（demo 参考）
-│   └── demo_strategies.py
-└── tools/                   # 工具脚本
-    └── generate_seed.py     # 生成初始 world 数据库
+│   ├── generate_town.py       # 生成初始 world 数据库
+│   └── town.py
 
 # 3. 核心模块
 
