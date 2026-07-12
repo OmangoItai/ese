@@ -768,9 +768,7 @@ class TestLiquidateFirm:
             goods={1: good},
         )
 
-        order = _make_order(
-            "o1", 1, 2, 1, quantity=10.0, price=5.0, status="OPEN", creation_tick=10
-        )
+        order = _make_order("o1", 1, 2, 1, quantity=10.0, price=5.0, status="OPEN")
         ws.all_orders["o1"] = order
         ws.supply_pool.append(order)
         self.ch.freeze_collateral(ws, order)
@@ -807,7 +805,6 @@ class TestLiquidateFirm:
             quantity=10.0,
             price=5.0,
             status="ALLOCATED",
-            creation_tick=10,
         )
         ws.all_orders["o1"] = order
         ws.pending_orders.append(order)
@@ -964,12 +961,10 @@ class TestExpireStaleOrders:
             goods={1: good},
         )
 
-        order_old = _make_order(
-            "o1", 1, 2, 1, quantity=10.0, price=5.0, status="OPEN", creation_tick=5
-        )
-        order_new = _make_order(
-            "o2", 1, 2, 1, quantity=5.0, price=5.0, status="OPEN", creation_tick=35
-        )
+        order_old = _make_order("o1", 1, 2, 1, quantity=10.0, price=5.0, status="OPEN")
+        order_new = _make_order("o2", 1, 2, 1, quantity=5.0, price=5.0, status="OPEN")
+        order_old.creation_tick = 5
+        order_new.creation_tick = 35
 
         for o in [order_old, order_new]:
             ws.all_orders[o.order_id] = o
@@ -995,9 +990,8 @@ class TestExpireStaleOrders:
             goods={1: good},
         )
 
-        order = _make_order(
-            "o1", 1, 2, 1, quantity=10.0, price=5.0, status="OPEN", creation_tick=5
-        )
+        order = _make_order("o1", 1, 2, 1, quantity=10.0, price=5.0, status="OPEN")
+        order.creation_tick = 5
         ws.all_orders["o1"] = order
         ws.supply_pool.append(order)
         self.ch.freeze_collateral(ws, order)
@@ -1022,9 +1016,8 @@ class TestExpireStaleOrders:
             goods={1: good},
         )
 
-        order = _make_order(
-            "o1", 1, 2, 1, quantity=10.0, price=5.0, status="OPEN", creation_tick=5
-        )
+        order = _make_order("o1", 1, 2, 1, quantity=10.0, price=5.0, status="OPEN")
+        order.creation_tick = 5
         ws.all_orders["o1"] = order
         ws.demand_pool.append(order)
         self.ch.freeze_collateral(ws, order)

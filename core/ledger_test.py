@@ -34,7 +34,6 @@ class TestLedger:
             good_id=1,
             quantity=10.0,
             price=5.0,
-            creation_tick=1,
             status="OPEN",
         )
         ledger.record_trade(o)
@@ -51,7 +50,6 @@ class TestLedger:
             good_id=1,
             quantity=10.0,
             price=5.0,
-            creation_tick=1,
             status="OPEN",
         )
         ledger.record_trade(o)
@@ -73,7 +71,6 @@ class TestLedger:
                 good_id=1,
                 quantity=1.0,
                 price=1.0,
-                creation_tick=i,
                 status="FULFILLED",
             )
             ledger.record_trade(o)
@@ -85,7 +82,6 @@ class TestLedger:
                 good_id=1,
                 quantity=1.0,
                 price=1.0,
-                creation_tick=10 + i,
                 status="FULFILLED",
             )
             ledger.record_trade(o)
@@ -108,7 +104,6 @@ class TestLedger:
                 good_id=1,
                 quantity=1.0,
                 price=1.0,
-                creation_tick=i,
                 status="FULFILLED",
             )
             ledger.record_trade(o)
@@ -129,7 +124,6 @@ class TestLedger:
                 good_id=1,
                 quantity=1.0,
                 price=price,
-                creation_tick=i,
                 status="FULFILLED",
             )
             ledger.record_trade(o)
@@ -142,7 +136,6 @@ class TestLedger:
                 good_id=1,
                 quantity=1.0,
                 price=99.0,
-                creation_tick=5 + i,
                 status="DEFAULTED",
             )
             ledger.record_trade(o)
@@ -163,7 +156,6 @@ class TestLedger:
                 good_id=1,
                 quantity=1.0,
                 price=10.0 + i,
-                creation_tick=i,
                 status="FULFILLED",
             )
             ledger.record_trade(o)
@@ -181,7 +173,6 @@ class TestLedger:
                 good_id=1,
                 quantity=1.0,
                 price=10.0,
-                creation_tick=i,
                 status="FULFILLED",
             )
             ledger.record_trade(o)
@@ -193,7 +184,6 @@ class TestLedger:
                 good_id=2,
                 quantity=1.0,
                 price=20.0,
-                creation_tick=3 + i,
                 status="FULFILLED",
             )
             ledger.record_trade(o)
@@ -214,7 +204,6 @@ class TestLedger:
             good_id=1,
             quantity=1.0,
             price=10.0,
-            creation_tick=0,
             status="FULFILLED",
         )
         ledger.record_trade(o)
@@ -225,7 +214,6 @@ class TestLedger:
             good_id=1,
             quantity=1.0,
             price=10.0,
-            creation_tick=1,
             status="DEFAULTED",
         )
         ledger.record_trade(o2)
@@ -243,7 +231,6 @@ class TestLedger:
                 good_id=1,
                 quantity=1.0,
                 price=float(i),
-                creation_tick=i,
                 status="FULFILLED",
             )
             ledger.record_trade(o)

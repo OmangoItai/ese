@@ -56,7 +56,6 @@ def farm_strategy(mi: MarketIntelligence, firm: Firm, goods: Dict[int, Good], or
                 price=2.0,
                 side=OrderSide.SUPPLY,
                 description="农场卖食物",
-                creation_tick=tick,
             )
         )
 
@@ -72,7 +71,6 @@ def farm_strategy(mi: MarketIntelligence, firm: Firm, goods: Dict[int, Good], or
                 price=3.0,
                 side=OrderSide.DEMAND,
                 description="农场买工具",
-                creation_tick=tick,
             )
         )
 
@@ -107,7 +105,6 @@ def workshop_strategy(
                 price=3.0,
                 side=OrderSide.SUPPLY,
                 description="工坊卖工具",
-                creation_tick=tick,
             )
         )
 
@@ -123,7 +120,6 @@ def workshop_strategy(
                 price=2.0,
                 side=OrderSide.DEMAND,
                 description="工坊买食物",
-                creation_tick=tick,
             )
         )
 
@@ -161,7 +157,6 @@ def household_strategy(
                     price=2.0,
                     side=OrderSide.DEMAND,
                     description="家庭买食物",
-                    creation_tick=tick,
                 )
             )
 
@@ -179,7 +174,6 @@ def household_strategy(
                     price=3.0,
                     side=OrderSide.DEMAND,
                     description="家庭买工具",
-                    creation_tick=tick,
                 )
             )
 
@@ -248,7 +242,6 @@ def town_allocation(
                 price=price,
                 side=s.side,
                 description=s.description,
-                creation_tick=mi.tick,
             )
             matched.append(matched_order)
 

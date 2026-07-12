@@ -785,7 +785,6 @@ class TestMarketIntelligence:
                 price=2.0,
                 side=OrderSide.SUPPLY,
                 description="B2C",
-                creation_tick=tick,
             )
             demand = Order(
                 order_id="dem1",
@@ -796,7 +795,6 @@ class TestMarketIntelligence:
                 price=2.0,
                 side=OrderSide.DEMAND,
                 description="B2C",
-                creation_tick=tick,
             )
             sim.state.supply_pool.append(supply)
             sim.state.demand_pool.append(demand)
@@ -862,7 +860,6 @@ def _firm_strategy_for_test(mi, firm, goods, orders):
                     price=2.0,
                     side=OrderSide.SUPPLY,
                     description="B2C",
-                    creation_tick=tick,
                 )
             )
         if firm.cash > 50.0 and firm.inventory.get(2, 0.0) < 10.0:
@@ -876,7 +873,6 @@ def _firm_strategy_for_test(mi, firm, goods, orders):
                     price=3.0,
                     side=OrderSide.DEMAND,
                     description="B2B",
-                    creation_tick=tick,
                 )
             )
     elif firm.id == 102:
@@ -897,7 +893,6 @@ def _firm_strategy_for_test(mi, firm, goods, orders):
                     price=3.0,
                     side=OrderSide.SUPPLY,
                     description="B2B",
-                    creation_tick=tick,
                 )
             )
         if firm.cash > 50.0 and firm.inventory.get(1, 0.0) < 10.0:
@@ -911,7 +906,6 @@ def _firm_strategy_for_test(mi, firm, goods, orders):
                     price=2.0,
                     side=OrderSide.DEMAND,
                     description="B2C",
-                    creation_tick=tick,
                 )
             )
     return result
@@ -1070,7 +1064,6 @@ class TestAllocationPolicy:
                 price=1.0,
                 side=OrderSide.SUPPLY,
                 description="B2C",
-                creation_tick=tick,
             )
             supply_expensive = Order(
                 order_id="s_exp",
@@ -1081,7 +1074,6 @@ class TestAllocationPolicy:
                 price=5.0,
                 side=OrderSide.SUPPLY,
                 description="B2C",
-                creation_tick=tick,
             )
             demand = Order(
                 order_id="d1",
@@ -1092,7 +1084,6 @@ class TestAllocationPolicy:
                 price=3.0,
                 side=OrderSide.DEMAND,
                 description="B2C",
-                creation_tick=tick,
             )
 
             sim.state.all_orders["s_cheap"] = supply_cheap

@@ -27,7 +27,7 @@ class Order:
     price: float  # 单价
     side: OrderSide = OrderSide.SUPPLY  # 决定进供应池还是需求池
     description: str = ""  # 自由文本标签
-    creation_tick: int = 0
+    creation_tick: int = field(default=0, init=False)
     settlement_tick: int = 0  # 0=未分配哨兵；分配后=tick+delivery_lag
     status: str = "OPEN"  # OPEN→ALLOCATED→FULFILLED|DEFAULTED|CANCELLED|EXPIRED
 

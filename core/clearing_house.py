@@ -470,10 +470,10 @@ class ClearingHouse:
                 quantity=qty,
                 price=min_price,
                 description="foreclosure",
-                creation_tick=state.tick,
                 settlement_tick=state.tick,
                 status="FULFILLED",
             )
+            fo.creation_tick = state.tick
             state.all_orders[fo.order_id] = fo
             self.ledger.record_trade(fo)
 

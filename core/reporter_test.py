@@ -78,7 +78,6 @@ class TestCalcEngel:
                 good_id=1,
                 quantity=2.0,
                 price=5.0,
-                creation_tick=i,
                 status="FULFILLED",
             )
             ledger.record_trade(o)
@@ -90,7 +89,6 @@ class TestCalcEngel:
                 good_id=2,
                 quantity=1.0,
                 price=10.0,
-                creation_tick=5 + i,
                 status="FULFILLED",
             )
             ledger.record_trade(o)
@@ -112,7 +110,6 @@ class TestCalcEngel:
                 good_id=1,
                 quantity=1.0,
                 price=1.0,
-                creation_tick=i,
                 status="FULFILLED",
             )
             ledger.record_trade(o)
@@ -136,7 +133,6 @@ class TestCalcEngel:
                 good_id=2,
                 quantity=1.0,
                 price=1.0,
-                creation_tick=i,
                 status="FULFILLED",
             )
             ledger.record_trade(o)
@@ -166,7 +162,6 @@ class TestCalcEngel:
             good_id=1,
             quantity=100.0,
             price=100.0,
-            creation_tick=0,
             status="FULFILLED",
         )
         ledger.record_trade(o_food)
@@ -177,7 +172,6 @@ class TestCalcEngel:
             good_id=2,
             quantity=1.0,
             price=1.0,
-            creation_tick=1,
             status="FULFILLED",
         )
         ledger.record_trade(o_hh)
@@ -200,7 +194,6 @@ class TestCalcEngel:
             good_id=1,
             quantity=100.0,
             price=1.0,
-            creation_tick=0,
             status="FULFILLED",
         )
         ledger.record_trade(o_old_food)
@@ -211,9 +204,9 @@ class TestCalcEngel:
             good_id=2,
             quantity=1.0,
             price=1.0,
-            creation_tick=10,
             status="FULFILLED",
         )
+        o_new_iron.creation_tick = 10
         ledger.record_trade(o_new_iron)
 
         engel = Reporter.calc_engel(households, goods, ledger, n_ticks=5)
@@ -230,7 +223,6 @@ class TestCalcEngel:
             good_id=1,
             quantity=0.0,
             price=1.0,
-            creation_tick=0,
             status="FULFILLED",
         )
         ledger.record_trade(o)
