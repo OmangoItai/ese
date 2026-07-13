@@ -31,8 +31,8 @@ class _Slot:
                 f"Entity {entity.id} will take no action this tick.",
                 RuntimeWarning,
             )
-            return {"new": [], "cancel": [], "update": []}
-        return strategy(mi, entity, goods, orders)
+            return
+        strategy(mi, entity, goods, orders)
 
 
 class _AllocationSlot(_Slot):

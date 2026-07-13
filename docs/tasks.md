@@ -349,10 +349,220 @@
 
 ---
 
+## 9. 数据层：AgentOrders + 世界生成 API
+
+**产出**：`core/entities.py`（修改）、`core/data_layer.py`（新增）、`ese/__init__.py`（修改）；修改 `core/simulator.py`、`examples/town.py`、`examples/generate_town.py`、`readme.md`；适配所有 `core/*_test.py`
+
+**依据**：本文件 §9（新设计）；docs/update.md §5（数据层三层架构草稿）
+
+**动机**：
+
+- 当前 `Order.order_id` 是必填字段，用户在策略中手拼字符串（如 `f"f{firm.id}_sell_food_{mi.tick}"`），不能保证唯一性，且不应该由用户管理
+- 当前策略需手动管理 `return {"new": [...], "cancel": [...], "update": [...]}` 三字段字典，啰嗦
+- 世界生成依赖手写 SQL（`examples/generate_town.py` 158 行 CREATE TABLE + INSERT），啰嗦且易错
+- 引擎内部缺少统一的订单 ID 生成器和世界定义 API，数据层职责散落在 `Simulator` 各处
+- 未来可能将运行时热数据（池、订单）替换为 Redis 等外部缓存，需要清晰的数据边界
+
+**核心设计决策**：
+
+| 决策 | 选项 | 选择 | 理由 |
+|------|------|------|------|
+| 用户操作入口 | 新类型 `OrderNew` / 参数式 `orders.new()` / 装饰器隐式 | **`orders.new()` 挂在已有 `orders` 参数上** | 无新 import、无新参数、用户自然地在策略内部直接操作 `orders` |
+| 策略返回值 | `return {new, cancel, update}` vs 不 return | **不 return** | `orders.new()` 直接记录意图，引擎策略执行后统一读取 |
+| 引擎侧管道 | 改动 vs 不动 | **不动 `_dispatch_agent_result`** | `orders._consume()` 返回的仍是 `{new, cancel, update}` 三字段，原有管道完整保留 |
+| 世界生成 | 手写 SQL vs Python API | **`WorldBuilder` 流式 API** | `w.add_firm(...).save()` 替代 158 行 SQL |
+| 引擎内部订单 | 用 Orders API vs 直接 `Order(...)` | **直接 `Order(...)`** | `liquidate_firm` 等引擎内部代码是"可信代码"；`foreclosure_*` 等语义化 ID 对调试有价值 |
+| 分配策略 | 受影响 vs 不受影响 | **不受影响** | 分配策略签名（返回 tuple）和流程不变 |
+
+**策略签名汇总（与 §8 一致，不变）：**
+
+| 插槽 | 签名 |
+|------|------|
+| firm | `(mi, firm, goods, orders)` |
+| household | `(mi, hh, goods, orders)` |
+| government | `(mi, gov, goods, orders)` |
+| allocation | `(mi, supply_pool, demand_pool, goods, pricing=None)` |
+
+---
+
+### 9.1 修改 `core/entities.py`：新增 `AgentOrders`
+
+- [x] 9.1.1 新增 `AgentOrders` 类：
+
+```python
+class AgentOrders:
+     """策略中的 orders 参数。可遍历（读写清单条）且可操作（new/cancel/update）。
+    方法调用只记录意图，引擎策略执行后统一处理。
+    """
+    def __init__(self, orders: list[Order]):
+        self._orders = orders          # 当前 OPEN/ALLOCATED 订单列表
+        self._new: list[dict] = []     # 收集新建意图
+        self._cancel: list[str] = []   # 收集撤销意图
+        self._update: list[dict] = [] # 收集替换意图
+
+
+    # ——— 可遍历（只读当前订单）———
+
+    def __iter__(self): return iter(self._orders)
+    def __getitem__(self, i): return self._orders[i]
+    def __len__(self): return len(self._orders)
+
+
+    # ——— 用户操作接口（记录意图，非直接 CRUD）———
+
+    def new(self, *, seller_id: int, buyer_id: int, good_id: int,
+            quantity: float, price: float, side: OrderSide = OrderSide.SUPPLY,
+            description: str = "") -> None: ...
+
+    def cancel(self, order_id: str) -> None: ...
+
+    def update(self, order_id: str, *, seller_id: int, buyer_id: int,
+                good_id: int, quantity: float, price: float,
+                side: OrderSide = OrderSide.SUPPLY,
+                description: str = "") -> None: ...
+
+
+    # ——— 引擎内部调用 ————
+
+    def _consume(self) -> dict:
+        """取出并清空积攒的意图，返回 {new, cancel, update} 给 _dispatch_agent_result。"""
+```
+
+- [x] 9.1.2 `Order.order_id` 保持 `str`（无默认值）——仅引擎内部构造，用户不碰。`Order` 保留在 `ese` facade 中作为只读类型导出（用户遍历 `orders` 时拿到这些 `Order` 对象）
+
+### 9.2 新建 `core/data_layer.py`：Sequence + OrderFactory + WorldLoader + WorldBuilder
+
+- [x] 9.2.1 实现 `Sequence` 类：线程安全的自动递增计数器，`next() -> str` 返回 `f"order_{n}"`
+
+- [x] 9.2.2 实现 `OrderFactory` 类：
+
+```python
+class OrderFactory:
+    def __init__(self, id_seq: Sequence): ...
+
+    def from_params(self, *, seller_id, buyer_id, good_id, quantity, price,
+                    side=OrderSide.SUPPLY, description="") -> Order:
+        """从 orders.new() 积攒的参数 dict 构造 Order，注入 order_id。"""
+
+    def from_update(self, update_params: dict) -> Order:
+        """从 orders.update() 积攒的参数构造 Order，order_id 沿用旧单的。"""
+```
+
+- [x] 9.2.3 实现 `WorldLoader` 类（从 `core/simulator.py` 的 `_load_world` 静态方法迁移，代码逻辑不变）：
+
+```python
+class WorldLoader:
+    @staticmethod
+    def load(db_path: str) -> WorldState:
+        """从 SQLite 加载世界，校验 delivery_lag、good_type 枚举、1 政府。"""
+```
+
+- [x] 9.2.4 实现 `WorldBuilder` 类（流式 API，替代手写 SQL）：
+
+```python
+class WorldBuilder:
+    def __init__(self): ...
+
+    def add_good(self, good_id: int, name: str, good_type: str,
+                 delivery_lag: int = 1) -> 'WorldBuilder': ...
+
+    def add_firm(self, id: int, cash: float, *,
+                 capacity: float = 0, strategy_label: str = "default",
+                 inventory: dict[int, float] | None = None,
+                 employees: list[int] | None = None) -> 'WorldBuilder': ...
+
+    def add_household(self, id: int, cash: float, *,
+                      labor_ask_price: float = 0,
+                      is_employed: bool = False,
+                      employer_firm_id: int | None = None,
+                      inventory: dict[int, float] | None = None,
+                      strategy_label: str = "default") -> 'WorldBuilder': ...
+
+    def add_government(self, id: int, cash: float, *,
+                       tax_rate: float = 0,
+                       unemployment_benefit: float = 0,
+                       strategy_label: str = "default") -> 'WorldBuilder': ...
+
+    def build(self) -> WorldState:
+        """不写 DB，直接返回 WorldState（用于测试/快速启动）。"""
+
+    def save(self, db_path: str) -> None:
+        """持久化到 SQLite。"""
+```
+
+`save()` 内部建表：`goods`、`firms`、`firm_inventory`、`firm_employees`、`households`、`household_inventory`、`governments`（7 张表，与当前 `generate_town.py` 的 schema 一致）。覆盖或新建 db 文件。
+
+### 9.3 修改 `core/simulator.py`：集成数据层
+
+- [x] 9.3.1 删除 `_load_world` 静态方法（已迁移到 `WorldLoader`）
+- [x] 9.3.2 `Simulator.__init__`：创建 `Sequence()` → `OrderFactory(sequence)`；用 `WorldLoader.load()` 替代 `self._load_world()`
+- [x] 9.3.3 修改 `_execute_strategy`：
+
+  - 在调用每个主体策略前，构造 `AgentOrders(my_orders)` 作为 `orders` 参数传入
+  - 策略执行完毕后，调用 `orders._consume()` 取出 `{new, cancel, update}` dict
+  - 将 dict 传给 `_dispatch_agent_result`（该方法不变，仍收同样的三字段数据结构）
+
+  ```python
+  # _execute_strategy 核心逻辑
+  for firm in state.firms.values():
+      if not firm.is_active:
+          continue
+      my_orders = firm.outstanding_orders(state.all_orders)
+      orders = AgentOrders(my_orders)
+      firm_fn(mi, firm, state.goods, orders)
+      self._dispatch_agent_result(state, orders._consume())
+  ```
+
+- [x] 9.3.4 `_dispatch_agent_result` **不需要改**：仍处理 `{new: [...], cancel: [...], update: [...]}` 三字段。唯一的区别是过去直接收策略返回值，现在收 `orders._consume()` 的输出 — 数据结构一模一样。
+
+- [x] 9.3.5 `_execute_allocation` **不受影响**：分配策略仍返回 `(matched: list[Order], remaining_supply, remaining_demand)`，流程不变
+
+### 9.4 修改 `ese/__init__.py`：新增公开导出
+
+- [x] 9.4.1 新增 `from core.data_layer import WorldBuilder`
+- [x] 9.4.2 保持 `Order` 导出（用户遍历 `orders` 时拿到 `Order` 对象）
+- [x] 9.4.3 **不需要** 新增 `OrderNew`/`OrderUpdate` 导出（不存在这两个类型）
+
+### 9.5 重写 `examples/generate_town.py`：WorldBuilder API
+
+- [x] 9.5.1 删除所有手写 SQL（`sqlite3.connect`、`CREATE TABLE`、`INSERT`）
+- [x] 9.5.2 用 `WorldBuilder` 链式调用定义 town 世界（2 商品、2 企业、10 家庭、1 政府）
+- [x] 9.5.3 调用 `builder.save("examples/town_world.db")`
+
+### 9.6 修改 `examples/town.py`：orders.new/cancel/update
+
+- [x] 9.6.1 所有策略删掉 `result = {"new": [], "cancel": [], "update": []}` 和 `return result`
+- [x] 9.6.2 原 `result["new"].append(Order(...))` 改为 `orders.new(seller_id=..., ...)`
+- [x] 9.6.3 原 `result["cancel"].append("order_5")` 改为 `orders.cancel("order_5")`
+- [x] 9.6.4 原 `result["update"].append(Order(...))` 改为 `orders.update("old_id", seller_id=..., ...)`
+- [x] 9.6.5 分配策略 `alloc` 中 matched 仍为 `Order(...)`（不受影响），`order_id` 走原有格式
+- [x] 9.6.6 import 不变，仍是 `from ese import Engine, OrderSide`
+
+### 9.7 修改 `readme.md`：更新示例代码
+
+- [x] 9.7.1 所有策略示例删除 `result = {...}` 和 `return result`，改用 `orders.new`/`orders.cancel`
+- [x] 9.7.2 快速开始 §4.2 世界生成步骤更新为 `WorldBuilder` API 示例
+
+### 9.8 适配测试
+
+- [x] 9.8.1 `core/entities_test.py`：新增 `AgentOrders` 构造 + `__iter__`/`__len__` + `new`/`cancel`/`update` 记录意图 + `_consume` 返回正确三字段结构 测试
+- [x] 9.8.2 `core/data_layer_test.py`（新增）：测试 `OrderFactory.from_params`/`from_update` ID 注入；测试 `WorldBuilder.build()` 返回正确的 `WorldState`；测试 `WorldBuilder.save()` + `WorldLoader.load()` 往返
+- [x] 9.8.3 `core/simulator_test.py`：测试辅助函数的策略改为 `orders.new(...)` 风格（不 return）；`_dispatch_agent_result` 测试不需要改（输入格式不变）
+- [x] 9.8.4 `core/ledger_test.py` / `core/clearing_house_test.py` / `core/reporter_test.py` / `core/engine_test.py`：这些测试不涉及策略返回值格式，检查是否有直接构造 `Order(order_id=...)` 的地方需要适配
+- [x] 9.8.5 验证：`uv run pytest core/ -v` 全绿
+
+### 9.9 端到端验证
+
+- [x] 9.9.1 重新生成 town 世界：`uv run python examples/generate_town.py` → 输出 `town_world.db`
+- [x] 9.9.2 运行 town 模拟：`uv run python examples/town.py` → 正常跑完 50 tick，输出 CSV/图表
+- [x] 9.9.3 `uv run pytest core/ -v` 全绿
+
+---
+
 ## 依赖关系
 
 ```
-1(entities) ─→ 2(ledger+noise) ─→ 3a(clearing part1) ─→ 3b(clearing part2) ─→ 4(reporter) ─→ 5(simulator kernel) ─→ 6(strategies) ─→ 7(obs→MI refactor) ─→ 8(registry→Engine)
+1(entities) ─→ 2(ledger+noise) ─→ 3a(clearing part1) ─→ 3b(clearing part2) ─→ 4(reporter) ─→ 5(simulator kernel) ─→ 6(strategies) ─→ 7(obs→MI refactor) ─→ 8(registry→Engine) ─→ 9(data layer)
 ```
 
 每轮严格按顺序执行，前一轮全部打勾才进入下一轮。

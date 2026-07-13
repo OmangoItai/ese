@@ -9,6 +9,7 @@ from core.entities import (
     WorldState,
 )
 from core.market_intelligence import MarketIntelligence
+from core.data_layer import WorldBuilder
 
 __all__ = [
     "Engine",
@@ -20,4 +21,5 @@ __all__ = [
     "OrderSide",
     "WorldState",
     "MarketIntelligence",
+    "WorldBuilder",
 ]

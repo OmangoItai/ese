@@ -1,5 +1,14 @@
 from collections import deque
-from core.entities import Good, Order, Firm, Household, Government, WorldState
+from core.entities import (
+    AgentOrders,
+    Good,
+    Order,
+    Firm,
+    Household,
+    Government,
+    WorldState,
+    OrderSide,
+)
 
 
 class TestGood:
@@ -223,3 +232,88 @@ class TestWorldState:
         ws = WorldState(tick=0)
         assert isinstance(ws.collateral_pool, dict)
         assert len(ws.collateral_pool) == 0
+
+
+class TestAgentOrders:
+    def _make_order(self, order_id, **kwargs):
+        return Order(
+            order_id=order_id,
+            seller_id=kwargs.get("seller_id", 1),
+            buyer_id=kwargs.get("buyer_id", 2),
+            good_id=kwargs.get("good_id", 1),
+            quantity=kwargs.get("quantity", 10.0),
+            price=kwargs.get("price", 5.0),
+            side=kwargs.get("side", OrderSide.SUPPLY),
+        )
+
+    def test_construction_and_iteration(self):
+        o1 = self._make_order("o1")
+        o2 = self._make_order("o2")
+        orders = AgentOrders([o1, o2])
+        assert len(orders) == 2
+        assert orders[0].order_id == "o1"
+        assert [o.order_id for o in orders] == ["o1", "o2"]
+
+    def test_new_records_intent(self):
+        orders = AgentOrders([])
+        orders.new(
+            seller_id=1,
+            buyer_id=2,
+            good_id=3,
+            quantity=5.0,
+            price=10.0,
+            side=OrderSide.SUPPLY,
+            description="test",
+        )
+        assert len(orders._new) == 1
+        assert orders._new[0]["seller_id"] == 1
+        assert orders._new[0]["description"] == "test"
+
+    def test_cancel_records_intent(self):
+        orders = AgentOrders([])
+        orders.cancel("o1")
+        orders.cancel("o2")
+        assert orders._cancel == ["o1", "o2"]
+
+    def test_update_records_intent(self):
+        orders = AgentOrders([])
+        orders.update(
+            "old",
+            seller_id=1,
+            buyer_id=2,
+            good_id=3,
+            quantity=5.0,
+            price=10.0,
+            side=OrderSide.DEMAND,
+        )
+        assert len(orders._update) == 1
+        assert orders._update[0]["order_id"] == "old"
+
+    def test_consume_returns_empty_when_no_factory(self):
+        orders = AgentOrders([])
+        orders.new(seller_id=1, buyer_id=2, good_id=3, quantity=5.0, price=10.0)
+        orders.cancel("o1")
+        orders.update(
+            "oid", seller_id=1, buyer_id=2, good_id=3, quantity=5.0, price=10.0
+        )
+        result = orders._consume()
+        assert result["new"] == []
+        assert result["cancel"] == ["o1"]
+        assert result["update"] == []
+        assert len(orders._new) == 0
+        assert len(orders._cancel) == 0
+
+    def test_consume_with_factory_creates_orders(self):
+        from core.data_layer import OrderFactory, Sequence
+
+        seq = Sequence()
+        factory = OrderFactory(seq)
+        o1 = self._make_order("existing")
+        orders = AgentOrders([o1], order_factory=factory)
+        orders.new(seller_id=1, buyer_id=2, good_id=3, quantity=5.0, price=10.0)
+        orders.cancel("existing")
+        result = orders._consume()
+        assert len(result["new"]) == 1
+        assert isinstance(result["new"][0], Order)
+        assert result["new"][0].order_id.startswith("order_")
+        assert result["cancel"] == ["existing"]

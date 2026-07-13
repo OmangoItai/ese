@@ -7,14 +7,13 @@ from typing import Dict, Tuple, List
 
 from ese import (
     Engine,
-    Firm,
     Good,
     Government,
-    Household,
     MarketIntelligence,
     Order,
     OrderSide,
 )
+
 # ============================================================
 # 初始化引擎
 # ============================================================
@@ -29,19 +28,14 @@ ese = Engine(
 
 
 @ese.firm
-def firm_orchestrator(
-    mi: MarketIntelligence, firm: Firm, goods: Dict[int, Good], orders
-):
+def firm_orchestrator(mi: MarketIntelligence, firm, goods: Dict[int, Good], orders):
     """调度器：按 strategy_label 分发到标签策略"""
-    return ese.firm.use(firm.strategy_label, mi, firm, goods, orders)
+    ese.firm.use(firm.strategy_label, mi, firm, goods, orders)
 
 
 @ese.firm.label("farm")
-def farm_strategy(mi: MarketIntelligence, firm: Firm, goods: Dict[int, Good], orders):
+def farm_strategy(mi: MarketIntelligence, firm, goods: Dict[int, Good], orders):
     """农场：消耗工具 → 产出食物 → 卖食物、买工具"""
-    result = {"new": [], "cancel": [], "update": []}
-    tick = mi.tick
-
     # 生产：1 工具 → 5 食物
     tool_inv = firm.inventory.get(2, 0.0)
     if tool_inv >= 1.0:
@@ -52,45 +46,32 @@ def farm_strategy(mi: MarketIntelligence, firm: Firm, goods: Dict[int, Good], or
     food_qty = firm.inventory.get(1, 0.0)
     if food_qty > 2.0:
         sell_qty = min(food_qty - 2.0, 10.0)
-        result["new"].append(
-            Order(
-                order_id=f"f{firm.id}_sell_food_{tick}_{len(result['new'])}",
-                seller_id=firm.id,
-                buyer_id=0,
-                good_id=1,
-                quantity=sell_qty,
-                price=2.0,
-                side=OrderSide.SUPPLY,
-                description="农场卖食物",
-            )
+        orders.new(
+            seller_id=firm.id,
+            buyer_id=0,
+            good_id=1,
+            quantity=sell_qty,
+            price=2.0,
+            side=OrderSide.SUPPLY,
+            description="农场卖食物",
         )
 
     # 工具库存不足时采购
     if firm.cash > 50.0 and firm.inventory.get(2, 0.0) < 10.0:
-        result["new"].append(
-            Order(
-                order_id=f"f{firm.id}_buy_tool_{tick}_{len(result['new'])}",
-                seller_id=0,
-                buyer_id=firm.id,
-                good_id=2,
-                quantity=2.0,
-                price=3.0,
-                side=OrderSide.DEMAND,
-                description="农场买工具",
-            )
+        orders.new(
+            seller_id=0,
+            buyer_id=firm.id,
+            good_id=2,
+            quantity=2.0,
+            price=3.0,
+            side=OrderSide.DEMAND,
+            description="农场买工具",
         )
-
-    return result
 
 
 @ese.firm.label("workshop")
-def workshop_strategy(
-    mi: MarketIntelligence, firm: Firm, goods: Dict[int, Good], orders
-):
+def workshop_strategy(mi: MarketIntelligence, firm, goods: Dict[int, Good], orders):
     """工坊：消耗食物 → 产出工具 → 卖工具、买食物"""
-    result = {"new": [], "cancel": [], "update": []}
-    tick = mi.tick
-
     # 生产：2 食物 → 3 工具
     food_inv = firm.inventory.get(1, 0.0)
     if food_inv >= 2.0:
@@ -101,35 +82,27 @@ def workshop_strategy(
     tool_qty = firm.inventory.get(2, 0.0)
     if tool_qty > 2.0:
         sell_qty = min(tool_qty - 2.0, 5.0)
-        result["new"].append(
-            Order(
-                order_id=f"f{firm.id}_sell_tool_{tick}_{len(result['new'])}",
-                seller_id=firm.id,
-                buyer_id=0,
-                good_id=2,
-                quantity=sell_qty,
-                price=3.0,
-                side=OrderSide.SUPPLY,
-                description="工坊卖工具",
-            )
+        orders.new(
+            seller_id=firm.id,
+            buyer_id=0,
+            good_id=2,
+            quantity=sell_qty,
+            price=3.0,
+            side=OrderSide.SUPPLY,
+            description="工坊卖工具",
         )
 
     # 食物库存不足时采购
     if firm.cash > 50.0 and firm.inventory.get(1, 0.0) < 10.0:
-        result["new"].append(
-            Order(
-                order_id=f"f{firm.id}_buy_food_{tick}_{len(result['new'])}",
-                seller_id=0,
-                buyer_id=firm.id,
-                good_id=1,
-                quantity=3.0,
-                price=2.0,
-                side=OrderSide.DEMAND,
-                description="工坊买食物",
-            )
+        orders.new(
+            seller_id=0,
+            buyer_id=firm.id,
+            good_id=1,
+            quantity=3.0,
+            price=2.0,
+            side=OrderSide.DEMAND,
+            description="工坊买食物",
         )
-
-    return result
 
 
 # ============================================================
@@ -138,52 +111,39 @@ def workshop_strategy(
 
 
 @ese.household
-def household_strategy(
-    mi: MarketIntelligence, hh: Household, goods: Dict[int, Good], orders
-):
+def household_strategy(mi: MarketIntelligence, hh, goods: Dict[int, Good], orders):
     """家庭消费：每 tick 拿 20% 现金买东西，70% 买食物、30% 买工具"""
-    result = {"new": [], "cancel": [], "update": []}
-    tick = mi.tick
-
     budget = hh.cash * 0.2
     if budget < 0.5:
-        return result
+        return
 
     food_budget = budget * 0.7
     if food_budget > 0.5:
         qty = food_budget / 2.0
         if qty > 0.1:
-            result["new"].append(
-                Order(
-                    order_id=f"h{hh.id}_buy_food_{tick}_{len(result['new'])}",
-                    seller_id=0,
-                    buyer_id=hh.id,
-                    good_id=1,
-                    quantity=qty,
-                    price=2.0,
-                    side=OrderSide.DEMAND,
-                    description="家庭买食物",
-                )
+            orders.new(
+                seller_id=0,
+                buyer_id=hh.id,
+                good_id=1,
+                quantity=qty,
+                price=2.0,
+                side=OrderSide.DEMAND,
+                description="家庭买食物",
             )
 
     tool_budget = budget * 0.3
     if tool_budget > 0.5:
         qty = tool_budget / 3.0
         if qty > 0.1:
-            result["new"].append(
-                Order(
-                    order_id=f"h{hh.id}_buy_tool_{tick}_{len(result['new'])}",
-                    seller_id=0,
-                    buyer_id=hh.id,
-                    good_id=2,
-                    quantity=qty,
-                    price=3.0,
-                    side=OrderSide.DEMAND,
-                    description="家庭买工具",
-                )
+            orders.new(
+                seller_id=0,
+                buyer_id=hh.id,
+                good_id=2,
+                quantity=qty,
+                price=3.0,
+                side=OrderSide.DEMAND,
+                description="家庭买工具",
             )
-
-    return result
 
 
 # ============================================================
@@ -192,11 +152,9 @@ def household_strategy(
 
 
 @ese.government
-def government_strategy(
-    mi: MarketIntelligence, gov: Government, goods: Dict[int, Good], orders
-):
+def government_strategy(mi: MarketIntelligence, gov: Government, goods, orders):
     """税率和失业金在种子数据库中已设定，这里不做额外操作"""
-    return {"new": [], "cancel": [], "update": []}
+    pass
 
 
 # ============================================================

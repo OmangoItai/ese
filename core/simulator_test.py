@@ -6,6 +6,7 @@ import pytest
 import yaml
 
 from core.clearing_house import ClearingHouse
+from core.data_layer import WorldLoader
 from core.entities import (
     Firm,
     Good,
@@ -178,7 +179,7 @@ def _make_mini_world_db() -> str:
 class TestLoadWorld:
     def test_world_state_matches_sqlite(self):
         db_path = _make_mini_world_db()
-        ws = Simulator._load_world(db_path)
+        ws = WorldLoader.load(db_path)
         try:
             assert ws.tick == 0
             assert len(ws.firms) == 2
@@ -233,7 +234,7 @@ class TestLoadWorld:
         )
         try:
             with pytest.raises(AssertionError, match="delivery_lag"):
-                Simulator._load_world(db_path)
+                WorldLoader.load(db_path)
         finally:
             os.unlink(db_path)
 
@@ -248,7 +249,7 @@ class TestLoadWorld:
         )
         try:
             with pytest.raises(AssertionError, match="good_type"):
-                Simulator._load_world(db_path)
+                WorldLoader.load(db_path)
         finally:
             os.unlink(db_path)
 
@@ -263,7 +264,7 @@ class TestLoadWorld:
         )
         try:
             with pytest.raises(ValueError, match="1 government"):
-                Simulator._load_world(db_path)
+                WorldLoader.load(db_path)
         finally:
             os.unlink(db_path)
 
@@ -281,7 +282,7 @@ class TestLoadWorld:
         )
         try:
             with pytest.raises(ValueError, match="1 government"):
-                Simulator._load_world(db_path)
+                WorldLoader.load(db_path)
         finally:
             os.unlink(db_path)
 
@@ -297,7 +298,7 @@ class TestLoadWorld:
             }
         )
         try:
-            ws = Simulator._load_world(db_path)
+            ws = WorldLoader.load(db_path)
             assert len(ws.governments) == 1
             assert ws.governments[1].cash == 1000.0
         finally:
@@ -839,9 +840,7 @@ def _make_one_firm_one_hh_db() -> str:
 
 
 def _firm_strategy_for_test(mi, firm, goods, orders):
-    """兼容测试用：firm 101+102 的合并策略，替代已删除的 examples.town.firm_strategy"""
-    result = {"new": [], "cancel": [], "update": []}
-    tick = mi.tick
+    """兼容测试用：firm 101+102 的合并策略，使用 orders.new() 风格"""
     if firm.id == 101:
         tool_inv = firm.inventory.get(2, 0.0)
         if tool_inv >= 1.0:
@@ -850,30 +849,24 @@ def _firm_strategy_for_test(mi, firm, goods, orders):
         food_qty = firm.inventory.get(1, 0.0)
         if food_qty > 2.0:
             sell_qty = min(food_qty - 2.0, 10.0)
-            result["new"].append(
-                Order(
-                    order_id=f"f{firm.id}_sell_{tick}_{len(result['new'])}",
-                    seller_id=firm.id,
-                    buyer_id=0,
-                    good_id=1,
-                    quantity=sell_qty,
-                    price=2.0,
-                    side=OrderSide.SUPPLY,
-                    description="B2C",
-                )
+            orders.new(
+                seller_id=firm.id,
+                buyer_id=0,
+                good_id=1,
+                quantity=sell_qty,
+                price=2.0,
+                side=OrderSide.SUPPLY,
+                description="B2C",
             )
         if firm.cash > 50.0 and firm.inventory.get(2, 0.0) < 10.0:
-            result["new"].append(
-                Order(
-                    order_id=f"f{firm.id}_buy_{tick}_{len(result['new'])}",
-                    seller_id=0,
-                    buyer_id=firm.id,
-                    good_id=2,
-                    quantity=2.0,
-                    price=3.0,
-                    side=OrderSide.DEMAND,
-                    description="B2B",
-                )
+            orders.new(
+                seller_id=0,
+                buyer_id=firm.id,
+                good_id=2,
+                quantity=2.0,
+                price=3.0,
+                side=OrderSide.DEMAND,
+                description="B2B",
             )
     elif firm.id == 102:
         food_inv = firm.inventory.get(1, 0.0)
@@ -883,32 +876,25 @@ def _firm_strategy_for_test(mi, firm, goods, orders):
         tool_qty = firm.inventory.get(2, 0.0)
         if tool_qty > 2.0:
             sell_qty = min(tool_qty - 2.0, 5.0)
-            result["new"].append(
-                Order(
-                    order_id=f"f{firm.id}_sell_{tick}_{len(result['new'])}",
-                    seller_id=firm.id,
-                    buyer_id=0,
-                    good_id=2,
-                    quantity=sell_qty,
-                    price=3.0,
-                    side=OrderSide.SUPPLY,
-                    description="B2B",
-                )
+            orders.new(
+                seller_id=firm.id,
+                buyer_id=0,
+                good_id=2,
+                quantity=sell_qty,
+                price=3.0,
+                side=OrderSide.SUPPLY,
+                description="B2B",
             )
         if firm.cash > 50.0 and firm.inventory.get(1, 0.0) < 10.0:
-            result["new"].append(
-                Order(
-                    order_id=f"f{firm.id}_buy_{tick}_{len(result['new'])}",
-                    seller_id=0,
-                    buyer_id=firm.id,
-                    good_id=1,
-                    quantity=3.0,
-                    price=2.0,
-                    side=OrderSide.DEMAND,
-                    description="B2C",
-                )
+            orders.new(
+                seller_id=0,
+                buyer_id=firm.id,
+                good_id=1,
+                quantity=3.0,
+                price=2.0,
+                side=OrderSide.DEMAND,
+                description="B2C",
             )
-    return result
 
 
 class TestStrategyRegistry:

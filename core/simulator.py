@@ -1,24 +1,14 @@
-import sqlite3
 from typing import Dict, List
 
 import yaml
 
 from core.clearing_house import ClearingHouse
-from core.entities import (
-    Firm,
-    Good,
-    Government,
-    Household,
-    Order,
-    OrderSide,
-    WorldState,
-)
+from core.data_layer import OrderFactory, Sequence, WorldLoader
+from core.entities import AgentOrders, Order, OrderSide, WorldState
 from core.ledger import Ledger
 from core.market_intelligence import MarketIntelligence, MarketIntelligenceBuilder
 from core.noise import InformationFriction
 from core.reporter import Reporter
-
-VALID_GOOD_TYPES = {"food", "labor", "capital", "consumer", "raw_material"}
 
 
 class Simulator:
@@ -32,7 +22,9 @@ class Simulator:
             fulfillment_window_ticks=self.config.get("fulfillment_window_ticks", 30),
         )
         self.reporter = Reporter()
-        self.state = self._load_world(world_db_path)
+        self._id_seq = Sequence()
+        self.order_factory = OrderFactory(self._id_seq)
+        self.state = WorldLoader.load(world_db_path)
         self.order_expire_ticks = self.config.get("order_expire_ticks", 30)
         self.mi_builder = MarketIntelligenceBuilder(
             self.noise, self.reporter, self.config
@@ -44,138 +36,6 @@ class Simulator:
     def _load_config(config_path: str) -> Dict:
         with open(config_path, "r", encoding="utf-8") as f:
             return yaml.safe_load(f)
-
-    @staticmethod
-    def _load_world(db_path: str) -> WorldState:
-        conn = sqlite3.connect(db_path)
-        try:
-            c = conn.cursor()
-
-            goods: Dict[int, Good] = {}
-            c.execute("SELECT good_id, name, good_type, delivery_lag FROM goods")
-            for row in c.fetchall():
-                good_id, name, good_type, delivery_lag = row
-                assert delivery_lag >= 1, (
-                    f"Good {good_id}: delivery_lag must be >= 1, got {delivery_lag}"
-                )
-                assert good_type in VALID_GOOD_TYPES, (
-                    f"Good {good_id}: invalid good_type '{good_type}'"
-                )
-                goods[good_id] = Good(
-                    good_id=good_id,
-                    name=name,
-                    good_type=good_type,
-                    delivery_lag=delivery_lag,
-                )
-
-            firms: Dict[int, Firm] = {}
-            c.execute(
-                "SELECT id, cash, capacity, collateral, is_active, strategy_label FROM firms"
-            )
-            cols = [d[0] for d in c.description]
-            for row in c.fetchall():
-                row_dict = dict(zip(cols, row))
-                fid = row_dict["id"]
-                kwargs = {
-                    "id": fid,
-                    "cash": float(row_dict["cash"]),
-                    "capacity": float(row_dict["capacity"]),
-                    "collateral": float(row_dict["collateral"]),
-                    "is_active": bool(row_dict["is_active"]),
-                }
-                if "strategy_label" in cols:
-                    kwargs["strategy_label"] = row_dict["strategy_label"]
-                firms[fid] = Firm(**kwargs)
-
-            c.execute("SELECT firm_id, good_id, quantity FROM firm_inventory")
-            for row in c.fetchall():
-                firm_id, good_id, quantity = row
-                if firm_id in firms:
-                    firms[firm_id].inventory[good_id] = float(quantity)
-
-            c.execute("SELECT firm_id, household_id FROM firm_employees")
-            for row in c.fetchall():
-                firm_id, household_id = row
-                if firm_id in firms:
-                    firms[firm_id].employees.append(household_id)
-
-            households: Dict[int, Household] = {}
-            c.execute(
-                "SELECT id, cash, labor_ask_price, is_employed, "
-                "employer_firm_id, unemployment_ticks, strategy_label FROM households"
-            )
-            cols = [d[0] for d in c.description]
-            for row in c.fetchall():
-                row_dict = dict(zip(cols, row))
-                hid = row_dict["id"]
-                kwargs = {
-                    "id": hid,
-                    "cash": float(row_dict["cash"]),
-                    "labor_ask_price": float(row_dict["labor_ask_price"]),
-                    "is_employed": bool(row_dict["is_employed"]),
-                    "employer_firm_id": row_dict["employer_firm_id"],
-                    "unemployment_ticks": row_dict["unemployment_ticks"],
-                }
-                if "strategy_label" in cols:
-                    kwargs["strategy_label"] = row_dict["strategy_label"]
-                households[hid] = Household(**kwargs)
-
-            c.execute("SELECT household_id, good_id, quantity FROM household_inventory")
-            for row in c.fetchall():
-                household_id, good_id, quantity = row
-                if household_id in households:
-                    households[household_id].inventory[good_id] = float(quantity)
-
-            governments: Dict[int, Government] = {}
-            c.execute(
-                "SELECT id, cash, tax_rate, money_supply, unemployment_benefit, strategy_label "
-                "FROM governments"
-            )
-            cols = [d[0] for d in c.description]
-            for row in c.fetchall():
-                row_dict = dict(zip(cols, row))
-                gid = row_dict["id"]
-                kwargs = {
-                    "id": gid,
-                    "cash": float(row_dict["cash"]),
-                    "tax_rate": float(row_dict["tax_rate"]),
-                    "money_supply": float(row_dict["money_supply"]),
-                    "unemployment_benefit": float(row_dict["unemployment_benefit"]),
-                }
-                if "strategy_label" in cols:
-                    kwargs["strategy_label"] = row_dict["strategy_label"]
-                governments[gid] = Government(**kwargs)
-
-            if len(governments) != 1:
-                raise ValueError(
-                    f"Expected exactly 1 government, got {len(governments)}. "
-                    "Multi-government is not yet supported (no jurisdiction "
-                    "assignment for firms/households)."
-                )
-
-            firm_ids = set(firms.keys())
-            hh_ids = set(households.keys())
-            overlap = firm_ids & hh_ids
-            if overlap:
-                raise ValueError(
-                    f"Firm and Household ID collision: {overlap}. "
-                    "All entity(Household, Firm, Government) IDs must be globally unique."
-                )
-
-            return WorldState(
-                tick=0,
-                firms=firms,
-                households=households,
-                governments=governments,
-                goods=goods,
-                supply_pool=[],
-                demand_pool=[],
-                pending_orders=[],
-                all_orders={},
-                collateral_pool={},
-            )
-        finally:
-            conn.close()
 
     def tick(self) -> WorldState:
         state = self.state
@@ -278,28 +138,25 @@ class Simulator:
                 if not firm.is_active:
                     continue
                 my_orders = firm.outstanding_orders(state.all_orders)
-                self._dispatch_agent_result(
-                    state,
-                    firm_fn(mi, firm, state.goods, my_orders),
-                )
+                orders = AgentOrders(my_orders, self.order_factory)
+                firm_fn(mi, firm, state.goods, orders)
+                self._dispatch_agent_result(state, orders._consume())
 
         hh_fn = self._reg.get("household") if self._reg else None
         if hh_fn is not None:
             for hh in state.households.values():
                 my_orders = hh.outstanding_orders(state.all_orders)
-                self._dispatch_agent_result(
-                    state,
-                    hh_fn(mi, hh, state.goods, my_orders),
-                )
+                orders = AgentOrders(my_orders, self.order_factory)
+                hh_fn(mi, hh, state.goods, orders)
+                self._dispatch_agent_result(state, orders._consume())
 
         gov_fn = self._reg.get("government") if self._reg else None
         if gov_fn is not None:
             for gov in state.governments.values():
                 my_orders = gov.outstanding_orders(state.all_orders)
-                self._dispatch_agent_result(
-                    state,
-                    gov_fn(mi, gov, state.goods, my_orders),
-                )
+                orders = AgentOrders(my_orders, self.order_factory)
+                gov_fn(mi, gov, state.goods, orders)
+                self._dispatch_agent_result(state, orders._consume())
 
     def _dispatch_agent_result(
         self,

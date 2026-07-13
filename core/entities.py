@@ -99,6 +99,95 @@ class Government:
         ]
 
 
+class AgentOrders:
+    """策略中的 orders 参数。可遍历（读写清单条）且可操作（new/cancel/update）。
+    方法调用只记录意图，引擎策略执行后统一处理。
+    """
+
+    def __init__(self, orders: list, order_factory=None):
+        self._orders = orders
+        self._new: list[dict] = []
+        self._cancel: list[str] = []
+        self._update: list[dict] = []
+        self._factory = order_factory
+
+    def __iter__(self):
+        return iter(self._orders)
+
+    def __getitem__(self, i):
+        return self._orders[i]
+
+    def __len__(self):
+        return len(self._orders)
+
+    def new(
+        self,
+        *,
+        seller_id: int,
+        buyer_id: int,
+        good_id: int,
+        quantity: float,
+        price: float,
+        side=None,
+        description: str = "",
+    ) -> None:
+        if side is None:
+            side = OrderSide.SUPPLY
+        self._new.append(
+            {
+                "seller_id": seller_id,
+                "buyer_id": buyer_id,
+                "good_id": good_id,
+                "quantity": quantity,
+                "price": price,
+                "side": side,
+                "description": description,
+            }
+        )
+
+    def cancel(self, order_id: str) -> None:
+        self._cancel.append(order_id)
+
+    def update(
+        self,
+        order_id: str,
+        *,
+        seller_id: int,
+        buyer_id: int,
+        good_id: int,
+        quantity: float,
+        price: float,
+        side=None,
+        description: str = "",
+    ) -> None:
+        if side is None:
+            side = OrderSide.SUPPLY
+        self._update.append(
+            {
+                "order_id": order_id,
+                "seller_id": seller_id,
+                "buyer_id": buyer_id,
+                "good_id": good_id,
+                "quantity": quantity,
+                "price": price,
+                "side": side,
+                "description": description,
+            }
+        )
+
+    def _consume(self) -> dict:
+        result = {"new": [], "cancel": list(self._cancel), "update": []}
+        if self._factory:
+            for p in self._new:
+                result["new"].append(self._factory.from_params(**p))
+            for p in self._update:
+                result["update"].append(self._factory.from_params(**p))
+        self._new = []
+        self._cancel = []
+        self._update = []
+        return result
+
+
 @dataclass
 class WorldState:
     tick: int
