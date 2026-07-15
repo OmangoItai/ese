@@ -8,6 +8,7 @@ import yaml
 from core.clearing_house import ClearingHouse
 from core.data_layer import WorldLoader
 from core.entities import (
+    AgentOrders,
     Firm,
     Good,
     Government,
@@ -174,6 +175,20 @@ def _make_mini_world_db() -> str:
             ],
         }
     )
+
+
+def _as_macro(sim, get_entities_fn, per_entity_fn):
+    def macro(mi, goods):
+        state = sim.state
+        for entity in get_entities_fn():
+            if hasattr(entity, "is_active") and not entity.is_active:
+                continue
+            my_orders = entity.outstanding_orders(state.all_orders)
+            orders = AgentOrders(my_orders, sim.order_factory)
+            per_entity_fn(mi, entity, goods, orders)
+            sim._dispatch_agent_result(state, orders._consume())
+
+    return macro
 
 
 class TestLoadWorld:
@@ -897,6 +912,89 @@ def _firm_strategy_for_test(mi, firm, goods, orders):
             )
 
 
+def _household_strategy_for_test(mi, hh, goods, orders):
+    budget = hh.cash * 0.2
+    if budget < 0.5:
+        return
+    food_budget = budget * 0.7
+    if food_budget > 0.5:
+        qty = food_budget / 2.0
+        if qty > 0.1:
+            orders.new(
+                seller_id=0,
+                buyer_id=hh.id,
+                good_id=1,
+                quantity=qty,
+                price=2.0,
+                side=OrderSide.DEMAND,
+                description="测试买食物",
+            )
+    tool_budget = budget * 0.3
+    if tool_budget > 0.5:
+        qty = tool_budget / 3.0
+        if qty > 0.1:
+            orders.new(
+                seller_id=0,
+                buyer_id=hh.id,
+                good_id=2,
+                quantity=qty,
+                price=3.0,
+                side=OrderSide.DEMAND,
+                description="测试买工具",
+            )
+
+
+def _allocation_for_test(mi, supply, demand, goods, pricing=None):
+    matched = []
+    matched_sids = set()
+    matched_dids = set()
+    sorted_supply = sorted(
+        [(i, o) for i, o in enumerate(supply) if o.quantity > 0],
+        key=lambda x: x[1].price,
+    )
+    sorted_demand = sorted(
+        [(i, o) for i, o in enumerate(demand) if o.quantity > 0],
+        key=lambda x: -x[1].price,
+    )
+    for si, s in sorted_supply:
+        if si in matched_sids:
+            continue
+        for di, d in sorted_demand:
+            if di in matched_dids:
+                continue
+            if s.good_id != d.good_id:
+                continue
+            if s.price > d.price:
+                continue
+            qty = min(s.quantity, d.quantity)
+            price = pricing(s, d, {}) if pricing else (s.price + d.price) / 2.0
+            matched_order = Order(
+                order_id=f"t_{s.good_id}_{s.seller_id}_{d.buyer_id}_{len(matched)}",
+                seller_id=s.seller_id,
+                buyer_id=d.buyer_id,
+                good_id=s.good_id,
+                quantity=qty,
+                price=price,
+                side=s.side,
+                description=s.description,
+            )
+            matched.append(matched_order)
+            s.quantity -= qty
+            d.quantity -= qty
+            if s.quantity <= 0:
+                matched_sids.add(si)
+            if d.quantity <= 0:
+                matched_dids.add(di)
+            break
+    remaining_supply = [o for i, o in enumerate(supply) if i not in matched_sids]
+    remaining_demand = [o for i, o in enumerate(demand) if i not in matched_dids]
+    return matched, remaining_supply, remaining_demand
+
+
+def _government_strategy_for_test(mi, gov, goods, orders):
+    pass
+
+
 class TestStrategyRegistry:
     def test_register_and_get(self):
         from core._registry import _StrategyRegistry
@@ -935,7 +1033,10 @@ class TestFirmDemoStrategy:
         try:
             reg = _StrategyRegistry()
             sim = Simulator(config_path, db_path, reg)
-            reg.set_primary("firm", firm_strategy)
+            reg.set_primary(
+                "firm",
+                _as_macro(sim, lambda: list(sim.state.firms.values()), firm_strategy),
+            )
 
             assert len(sim.state.market.supply) == 0
 
@@ -960,7 +1061,10 @@ class TestFirmDemoStrategy:
         try:
             reg = _StrategyRegistry()
             sim = Simulator(config_path, db_path, reg)
-            reg.set_primary("firm", firm_strategy)
+            reg.set_primary(
+                "firm",
+                _as_macro(sim, lambda: list(sim.state.firms.values()), firm_strategy),
+            )
 
             assert len(sim.state.market.demand) == 0
 
@@ -978,7 +1082,6 @@ class TestFirmDemoStrategy:
 
 class TestHouseholdDemoStrategy:
     def test_household_demo_grows_demand_pool(self):
-        from examples.town import household_strategy
         from core._registry import _StrategyRegistry
 
         db_path = _make_one_firm_one_hh_db()
@@ -986,7 +1089,14 @@ class TestHouseholdDemoStrategy:
         try:
             reg = _StrategyRegistry()
             sim = Simulator(config_path, db_path, reg)
-            reg.set_primary("household", household_strategy)
+            reg.set_primary(
+                "household",
+                _as_macro(
+                    sim,
+                    lambda: list(sim.state.households.values()),
+                    _household_strategy_for_test,
+                ),
+            )
 
             assert len(sim.state.market.demand) == 0
 
@@ -1005,7 +1115,6 @@ class TestHouseholdDemoStrategy:
 class TestAllocationPolicy:
     def test_allocation_creates_matched_orders(self):
         firm_strategy = _firm_strategy_for_test
-        from examples.town import household_strategy, town_allocation
         from core._registry import _StrategyRegistry
 
         db_path = _make_one_firm_one_hh_db()
@@ -1013,9 +1122,19 @@ class TestAllocationPolicy:
         try:
             reg = _StrategyRegistry()
             sim = Simulator(config_path, db_path, reg)
-            reg.set_primary("firm", firm_strategy)
-            reg.set_primary("household", household_strategy)
-            reg.set_primary("allocation", town_allocation)
+            reg.set_primary(
+                "firm",
+                _as_macro(sim, lambda: list(sim.state.firms.values()), firm_strategy),
+            )
+            reg.set_primary(
+                "household",
+                _as_macro(
+                    sim,
+                    lambda: list(sim.state.households.values()),
+                    _household_strategy_for_test,
+                ),
+            )
+            reg.set_primary("allocation", _allocation_for_test)
 
             assert len(sim.state.pending_orders) == 0
 
@@ -1033,8 +1152,6 @@ class TestAllocationPolicy:
             os.unlink(config_path)
 
     def test_allocation_price_lowest_supply_first(self):
-        from examples.town import town_allocation
-
         db_path = _make_one_firm_one_hh_db()
         config_path = _make_temp_config({"noise_type": "none"})
         try:
@@ -1081,7 +1198,7 @@ class TestAllocationPolicy:
             sim.clearing.freeze_collateral(sim.state, supply_expensive)
             sim.clearing.freeze_collateral(sim.state, demand)
 
-            matched, _, _ = town_allocation(
+            matched, _, _ = _allocation_for_test(
                 sim.mi,
                 list(sim.state.market.supply),
                 list(sim.state.market.demand),
@@ -1100,7 +1217,6 @@ class TestAllocationPolicy:
 class TestFullTickPipeline:
     def test_full_tick_inventory_transfer(self):
         firm_strategy = _firm_strategy_for_test
-        from examples.town import household_strategy, town_allocation
         from core._registry import _StrategyRegistry
 
         db_path = _make_one_firm_one_hh_db()
@@ -1108,9 +1224,19 @@ class TestFullTickPipeline:
         try:
             reg = _StrategyRegistry()
             sim = Simulator(config_path, db_path, reg)
-            reg.set_primary("firm", firm_strategy)
-            reg.set_primary("household", household_strategy)
-            reg.set_primary("allocation", town_allocation)
+            reg.set_primary(
+                "firm",
+                _as_macro(sim, lambda: list(sim.state.firms.values()), firm_strategy),
+            )
+            reg.set_primary(
+                "household",
+                _as_macro(
+                    sim,
+                    lambda: list(sim.state.households.values()),
+                    _household_strategy_for_test,
+                ),
+            )
+            reg.set_primary("allocation", _allocation_for_test)
 
             firm = sim.state.firms[101]
             hh = sim.state.households[201]
@@ -1141,7 +1267,6 @@ class TestFullTickPipeline:
             os.unlink(config_path)
 
     def test_government_strategy_does_nothing(self):
-        from examples.town import government_strategy
         from core._registry import _StrategyRegistry
 
         db_path = _make_one_firm_one_hh_db()
@@ -1149,7 +1274,14 @@ class TestFullTickPipeline:
         try:
             reg = _StrategyRegistry()
             sim = Simulator(config_path, db_path, reg)
-            reg.set_primary("government", government_strategy)
+            reg.set_primary(
+                "government",
+                _as_macro(
+                    sim,
+                    lambda: list(sim.state.governments.values()),
+                    _government_strategy_for_test,
+                ),
+            )
 
             pools_before = len(sim.state.market.supply) + len(sim.state.market.demand)
 
@@ -1178,7 +1310,10 @@ class TestMiNoise:
         try:
             reg = _StrategyRegistry()
             sim = Simulator(config_path, db_path, reg)
-            reg.set_primary("firm", firm_strategy)
+            reg.set_primary(
+                "firm",
+                _as_macro(sim, lambda: list(sim.state.firms.values()), firm_strategy),
+            )
 
             mi = sim.mi
             assert isinstance(mi.gini, float)
@@ -1197,7 +1332,10 @@ class TestMiNoise:
         try:
             reg = _StrategyRegistry()
             sim = Simulator(config_path, db_path, reg)
-            reg.set_primary("firm", firm_strategy)
+            reg.set_primary(
+                "firm",
+                _as_macro(sim, lambda: list(sim.state.firms.values()), firm_strategy),
+            )
 
             mi_no_noise = sim.mi
 

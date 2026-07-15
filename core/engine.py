@@ -1,43 +1,52 @@
 import os
-import warnings
-from typing import Dict, List
+from typing import Callable, Dict, List
 
 from core._registry import _StrategyRegistry
-from core.market_intelligence import MarketIntelligence
+from core.entities import AgentOrders
 from core.simulator import Simulator
 
 
 class _Slot:
-    def __init__(self, registry: _StrategyRegistry, slot_name: str):
+    def __init__(
+        self,
+        registry: _StrategyRegistry,
+        slot_name: str,
+        get_entities_fn: Callable,
+        simulator: Simulator,
+    ):
         self._reg = registry
         self._name = slot_name
+        self._get_entities = get_entities_fn
+        self._sim = simulator
 
     def __call__(self, func):
         self._reg.set_primary(self._name, func)
         return func
 
-    def label(self, label: str):
-        def decorator(func):
-            self._reg.set_labeled(self._name, label, func)
-            return func
-
-        return decorator
-
-    def use(self, label: str, mi, entity, goods, orders):
-        strategy = self._reg.get(self._name, label)
-        if strategy is None:
-            warnings.warn(
-                f"No '{label}' strategy registered for '{self._name}' slot. "
-                f"Entity {entity.id} will take no action this tick.",
-                RuntimeWarning,
-            )
-            return
-        strategy(mi, entity, goods, orders)
+    def apply(self, label: str, leaf_fn, **params):
+        state = self._sim.state
+        results = []
+        for entity in self._get_entities():
+            if hasattr(entity, "is_active") and not entity.is_active:
+                continue
+            if label not in entity.labels:
+                continue
+            my_orders = entity.outstanding_orders(state.all_orders)
+            orders = AgentOrders(my_orders, self._sim.order_factory)
+            result = leaf_fn(entity, orders, **params)
+            results.append(result)
+            self._sim._dispatch_agent_result(state, orders._consume())
+        return results
 
 
 class _AllocationSlot(_Slot):
-    def __init__(self, registry: _StrategyRegistry):
-        super().__init__(registry, "allocation")
+    def __init__(
+        self,
+        registry: _StrategyRegistry,
+        get_entities_fn: Callable,
+        simulator: Simulator,
+    ):
+        super().__init__(registry, "allocation", get_entities_fn, simulator)
 
     @property
     def pricing(self):
@@ -56,10 +65,29 @@ class Engine:
         self._simulator = Simulator(config_path, world_db_path, self._registry)
         self.output_dir = output_dir
 
-        self.firm = _Slot(self._registry, "firm")
-        self.household = _Slot(self._registry, "household")
-        self.government = _Slot(self._registry, "government")
-        self.allocation = _AllocationSlot(self._registry)
+        self.firm = _Slot(
+            self._registry,
+            "firm",
+            get_entities_fn=lambda: list(self._simulator.state.firms.values()),
+            simulator=self._simulator,
+        )
+        self.household = _Slot(
+            self._registry,
+            "household",
+            get_entities_fn=lambda: list(self._simulator.state.households.values()),
+            simulator=self._simulator,
+        )
+        self.government = _Slot(
+            self._registry,
+            "government",
+            get_entities_fn=lambda: list(self._simulator.state.governments.values()),
+            simulator=self._simulator,
+        )
+        self.allocation = _AllocationSlot(
+            self._registry,
+            get_entities_fn=lambda: None,
+            simulator=self._simulator,
+        )
 
     def run(self, n_ticks: int) -> List[Dict]:
         return self._simulator.run(n_ticks)

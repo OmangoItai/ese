@@ -8,7 +8,6 @@ from typing import Dict, Tuple, List
 from ese import (
     Engine,
     Good,
-    Government,
     MarketIntelligence,
     Order,
     OrderSide,
@@ -23,26 +22,17 @@ ese = Engine(
 )
 
 # ============================================================
-# 企业策略
+# 叶子函数：无装饰器的普通 Python 函数，由 apply() 直接传入实体实例
 # ============================================================
 
 
-@ese.firm
-def firm_orchestrator(mi: MarketIntelligence, firm, goods: Dict[int, Good], orders):
-    """调度器：按 labels[0] 分发到标签策略"""
-    ese.firm.use(firm.labels[0], mi, firm, goods, orders)
-
-
-@ese.firm.label("farm")
-def farm_strategy(mi: MarketIntelligence, firm, goods: Dict[int, Good], orders):
+def farm_decide(firm, orders):
     """农场：消耗工具 → 产出食物 → 卖食物、买工具"""
-    # 生产：1 工具 → 5 食物
     tool_inv = firm.inventory.get(2, 0.0)
     if tool_inv >= 1.0:
         firm.inventory[2] = tool_inv - 1.0
         firm.inventory[1] = firm.inventory.get(1, 0.0) + 5.0
 
-    # 挂单卖食物（留 2 做安全库存）
     food_qty = firm.inventory.get(1, 0.0)
     if food_qty > 2.0:
         sell_qty = min(food_qty - 2.0, 10.0)
@@ -56,7 +46,6 @@ def farm_strategy(mi: MarketIntelligence, firm, goods: Dict[int, Good], orders):
             description="农场卖食物",
         )
 
-    # 工具库存不足时采购
     if firm.cash > 50.0 and firm.inventory.get(2, 0.0) < 10.0:
         orders.new(
             seller_id=0,
@@ -69,16 +58,13 @@ def farm_strategy(mi: MarketIntelligence, firm, goods: Dict[int, Good], orders):
         )
 
 
-@ese.firm.label("workshop")
-def workshop_strategy(mi: MarketIntelligence, firm, goods: Dict[int, Good], orders):
+def workshop_decide(firm, orders):
     """工坊：消耗食物 → 产出工具 → 卖工具、买食物"""
-    # 生产：2 食物 → 3 工具
     food_inv = firm.inventory.get(1, 0.0)
     if food_inv >= 2.0:
         firm.inventory[1] = food_inv - 2.0
         firm.inventory[2] = firm.inventory.get(2, 0.0) + 3.0
 
-    # 挂单卖工具
     tool_qty = firm.inventory.get(2, 0.0)
     if tool_qty > 2.0:
         sell_qty = min(tool_qty - 2.0, 5.0)
@@ -92,7 +78,6 @@ def workshop_strategy(mi: MarketIntelligence, firm, goods: Dict[int, Good], orde
             description="工坊卖工具",
         )
 
-    # 食物库存不足时采购
     if firm.cash > 50.0 and firm.inventory.get(1, 0.0) < 10.0:
         orders.new(
             seller_id=0,
@@ -105,13 +90,7 @@ def workshop_strategy(mi: MarketIntelligence, firm, goods: Dict[int, Good], orde
         )
 
 
-# ============================================================
-# 家庭策略
-# ============================================================
-
-
-@ese.household
-def household_strategy(mi: MarketIntelligence, hh, goods: Dict[int, Good], orders):
+def household_spend(hh, orders):
     """家庭消费：每 tick 拿 20% 现金买东西，70% 买食物、30% 买工具"""
     budget = hh.cash * 0.2
     if budget < 0.5:
@@ -147,18 +126,31 @@ def household_strategy(mi: MarketIntelligence, hh, goods: Dict[int, Good], order
 
 
 # ============================================================
-# 政府策略
+# 宏函数：每 slot 只调一次，内部用 apply() 分发到实体
 # ============================================================
 
 
+@ese.firm
+def firm_macro(mi: MarketIntelligence, goods: Dict[int, Good]):
+    """企业宏函数：按 labels 分发到叶子函数"""
+    ese.firm.apply("farm", farm_decide)
+    ese.firm.apply("workshop", workshop_decide)
+
+
+@ese.household
+def household_macro(mi: MarketIntelligence, goods: Dict[int, Good]):
+    """家庭宏函数：所有家庭走同一个消费逻辑"""
+    ese.household.apply("default", household_spend)
+
+
 @ese.government
-def government_strategy(mi: MarketIntelligence, gov: Government, goods, orders):
-    """税率和失业金在种子数据库中已设定，这里不做额外操作"""
+def government_macro(mi: MarketIntelligence, goods: Dict[int, Good]):
+    """政府宏函数：税率和失业金在种子数据库中已设定，这里不做额外操作"""
     pass
 
 
 # ============================================================
-# 分配策略（价格优先匹配）
+# 分配策略（不变）
 # ============================================================
 
 
@@ -223,7 +215,7 @@ def town_allocation(
 
 
 # ============================================================
-# 定价策略
+# 定价策略（不变）
 # ============================================================
 
 

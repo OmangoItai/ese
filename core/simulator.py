@@ -4,7 +4,7 @@ import yaml
 
 from core.clearing_house import ClearingHouse
 from core.data_layer import OrderFactory, Sequence, WorldLoader
-from core.entities import AgentOrders, Order, OrderSide, WorldState
+from core.entities import Order, OrderSide, WorldState
 from core.market_intelligence import MarketIntelligence, MarketIntelligenceBuilder
 from core.noise import InformationFriction
 from core.reporter import Reporter
@@ -134,29 +134,15 @@ class Simulator:
     def _execute_strategy(self, mi: MarketIntelligence, state: WorldState) -> None:
         firm_fn = self._reg.get("firm") if self._reg else None
         if firm_fn is not None:
-            for firm in state.firms.values():
-                if not firm.is_active:
-                    continue
-                my_orders = firm.outstanding_orders(state.all_orders)
-                orders = AgentOrders(my_orders, self.order_factory)
-                firm_fn(mi, firm, state.goods, orders)
-                self._dispatch_agent_result(state, orders._consume())
+            firm_fn(mi, state.goods)
 
         hh_fn = self._reg.get("household") if self._reg else None
         if hh_fn is not None:
-            for hh in state.households.values():
-                my_orders = hh.outstanding_orders(state.all_orders)
-                orders = AgentOrders(my_orders, self.order_factory)
-                hh_fn(mi, hh, state.goods, orders)
-                self._dispatch_agent_result(state, orders._consume())
+            hh_fn(mi, state.goods)
 
         gov_fn = self._reg.get("government") if self._reg else None
         if gov_fn is not None:
-            for gov in state.governments.values():
-                my_orders = gov.outstanding_orders(state.all_orders)
-                orders = AgentOrders(my_orders, self.order_factory)
-                gov_fn(mi, gov, state.goods, orders)
-                self._dispatch_agent_result(state, orders._consume())
+            gov_fn(mi, state.goods)
 
     def _dispatch_agent_result(
         self,
