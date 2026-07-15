@@ -16,7 +16,7 @@ from core.entities import (
     OrderSide,
     WorldState,
 )
-from core.ledger import Ledger
+from core.ledger import TradeHistory
 from core.noise import InformationFriction
 from core.simulator import Simulator
 
@@ -44,7 +44,7 @@ def _make_temp_db(rows_dict: dict) -> str:
             capacity REAL NOT NULL DEFAULT 0.0,
             collateral REAL NOT NULL DEFAULT 0.0,
             is_active INTEGER NOT NULL DEFAULT 1,
-            strategy_label TEXT NOT NULL DEFAULT 'default')"""
+            labels TEXT NOT NULL DEFAULT 'default')"""
     )
     c.execute(
         """CREATE TABLE firm_inventory (
@@ -64,7 +64,7 @@ def _make_temp_db(rows_dict: dict) -> str:
             is_employed INTEGER NOT NULL DEFAULT 0,
             employer_firm_id INTEGER,
             unemployment_ticks INTEGER NOT NULL DEFAULT 0,
-            strategy_label TEXT NOT NULL DEFAULT 'default')"""
+            labels TEXT NOT NULL DEFAULT 'default')"""
     )
     c.execute(
         """CREATE TABLE household_inventory (
@@ -78,7 +78,7 @@ def _make_temp_db(rows_dict: dict) -> str:
             tax_rate REAL NOT NULL DEFAULT 0.0,
             money_supply REAL NOT NULL DEFAULT 0.0,
             unemployment_benefit REAL NOT NULL DEFAULT 0.0,
-            strategy_label TEXT NOT NULL DEFAULT 'default')"""
+            labels TEXT NOT NULL DEFAULT 'default')"""
     )
 
     for table, rows in rows_dict.items():
@@ -215,8 +215,8 @@ class TestLoadWorld:
             assert ws.goods[3].good_type == "raw_material"
             assert ws.goods[3].delivery_lag == 2
 
-            assert ws.supply_pool == []
-            assert ws.demand_pool == []
+            assert ws.market.supply == []
+            assert ws.market.demand == []
             assert ws.pending_orders == []
             assert ws.all_orders == {}
             assert ws.collateral_pool == {}
@@ -649,7 +649,7 @@ class TestInit:
         try:
             sim = Simulator(config_path, db_path)
 
-            assert isinstance(sim.ledger, Ledger)
+            assert isinstance(sim.state.market.history, TradeHistory)
             assert isinstance(sim.noise, InformationFriction)
             assert sim.state.tick == 0
             assert sim.mi is not None
@@ -797,10 +797,10 @@ class TestMarketIntelligence:
                 side=OrderSide.DEMAND,
                 description="B2C",
             )
-            sim.state.supply_pool.append(supply)
-            sim.state.demand_pool.append(demand)
+            sim.state.market.supply.append(supply)
+            sim.state.market.demand.append(demand)
 
-            mi = sim.mi_builder.build(sim.state, sim.ledger)
+            mi = sim.mi_builder.build(sim.state, sim.state.market.history)
 
             assert 1 in mi.sector_avg_price
             assert mi.sector_avg_price[1] == pytest.approx(2.0)
@@ -937,13 +937,13 @@ class TestFirmDemoStrategy:
             sim = Simulator(config_path, db_path, reg)
             reg.set_primary("firm", firm_strategy)
 
-            assert len(sim.state.supply_pool) == 0
+            assert len(sim.state.market.supply) == 0
 
             sim.tick()
 
-            supply_order_ids = {o.order_id for o in sim.state.supply_pool}
+            supply_order_ids = {o.order_id for o in sim.state.market.supply}
             assert len(supply_order_ids) > 0
-            for o in sim.state.supply_pool:
+            for o in sim.state.market.supply:
                 assert o.seller_id == 101
                 assert o.good_id == 1
                 assert o.status == "OPEN"
@@ -962,11 +962,11 @@ class TestFirmDemoStrategy:
             sim = Simulator(config_path, db_path, reg)
             reg.set_primary("firm", firm_strategy)
 
-            assert len(sim.state.demand_pool) == 0
+            assert len(sim.state.market.demand) == 0
 
             sim.tick()
 
-            demand_iron = [o for o in sim.state.demand_pool if o.good_id == 2]
+            demand_iron = [o for o in sim.state.market.demand if o.good_id == 2]
             assert len(demand_iron) > 0
             for o in demand_iron:
                 assert o.buyer_id == 101
@@ -988,11 +988,11 @@ class TestHouseholdDemoStrategy:
             sim = Simulator(config_path, db_path, reg)
             reg.set_primary("household", household_strategy)
 
-            assert len(sim.state.demand_pool) == 0
+            assert len(sim.state.market.demand) == 0
 
             sim.tick()
 
-            hh_orders = [o for o in sim.state.demand_pool if o.buyer_id == 201]
+            hh_orders = [o for o in sim.state.market.demand if o.buyer_id == 201]
             assert len(hh_orders) > 0
             for o in hh_orders:
                 assert o.side == OrderSide.DEMAND
@@ -1075,16 +1075,16 @@ class TestAllocationPolicy:
             sim.state.all_orders["s_cheap"] = supply_cheap
             sim.state.all_orders["s_exp"] = supply_expensive
             sim.state.all_orders["d1"] = demand
-            sim.state.supply_pool = [supply_cheap, supply_expensive]
-            sim.state.demand_pool = [demand]
+            sim.state.market.supply = [supply_cheap, supply_expensive]
+            sim.state.market.demand = [demand]
             sim.clearing.freeze_collateral(sim.state, supply_cheap)
             sim.clearing.freeze_collateral(sim.state, supply_expensive)
             sim.clearing.freeze_collateral(sim.state, demand)
 
             matched, _, _ = town_allocation(
                 sim.mi,
-                list(sim.state.supply_pool),
-                list(sim.state.demand_pool),
+                list(sim.state.market.supply),
+                list(sim.state.market.demand),
                 sim.state.goods,
             )
 
@@ -1151,11 +1151,11 @@ class TestFullTickPipeline:
             sim = Simulator(config_path, db_path, reg)
             reg.set_primary("government", government_strategy)
 
-            pools_before = len(sim.state.supply_pool) + len(sim.state.demand_pool)
+            pools_before = len(sim.state.market.supply) + len(sim.state.market.demand)
 
             sim.tick()
 
-            pools_after = len(sim.state.supply_pool) + len(sim.state.demand_pool)
+            pools_after = len(sim.state.market.supply) + len(sim.state.market.demand)
             assert pools_after == pools_before
         finally:
             os.unlink(db_path)

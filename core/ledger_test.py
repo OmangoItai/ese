@@ -1,4 +1,4 @@
-from core.ledger import Ledger, TradeRecord
+from core.ledger import TradeHistory, TradeRecord
 from core.entities import Order
 
 
@@ -24,9 +24,9 @@ class TestTradeRecord:
         assert tr.status == "FULFILLED"
 
 
-class TestLedger:
+class TestTradeHistory:
     def test_record_trade_appends(self):
-        ledger = Ledger()
+        ledger = TradeHistory()
         o = Order(
             order_id="o1",
             seller_id=1,
@@ -42,7 +42,7 @@ class TestLedger:
         assert ledger.records[0].status == "OPEN"
 
     def test_record_trade_multiple_states(self):
-        ledger = Ledger()
+        ledger = TradeHistory()
         o = Order(
             order_id="o1",
             seller_id=1,
@@ -62,7 +62,7 @@ class TestLedger:
         assert statuses == ["OPEN", "ALLOCATED", "FULFILLED"]
 
     def test_get_trades_by_agent(self):
-        ledger = Ledger()
+        ledger = TradeHistory()
         for i in range(10):
             o = Order(
                 order_id=f"o{i}",
@@ -95,7 +95,7 @@ class TestLedger:
         assert all(r.buyer_id == 2 for r in agent2_trades)
 
     def test_get_trades_by_agent_limit_n(self):
-        ledger = Ledger()
+        ledger = TradeHistory()
         for i in range(20):
             o = Order(
                 order_id=f"o{i}",
@@ -113,7 +113,7 @@ class TestLedger:
         assert recent[-1].order_id == "o19"
 
     def test_get_avg_price_by_good(self):
-        ledger = Ledger()
+        ledger = TradeHistory()
         goods_1_fulfilled = []
         for i in range(5):
             price = 10.0 + i
@@ -143,11 +143,11 @@ class TestLedger:
         assert ledger.get_avg_price_by_good(1) == expected_avg
 
     def test_get_avg_price_by_good_empty(self):
-        ledger = Ledger()
+        ledger = TradeHistory()
         assert ledger.get_avg_price_by_good(99) == 0.0
 
     def test_get_avg_price_by_good_limit_n(self):
-        ledger = Ledger()
+        ledger = TradeHistory()
         for i in range(10):
             o = Order(
                 order_id=f"o{i}",
@@ -164,7 +164,7 @@ class TestLedger:
         assert avg_recent_3 == expected
 
     def test_get_all_recent_prices(self):
-        ledger = Ledger()
+        ledger = TradeHistory()
         for i in range(3):
             o = Order(
                 order_id=f"g1_{i}",
@@ -196,7 +196,7 @@ class TestLedger:
         assert all(p == 20.0 for p in result[2])
 
     def test_get_all_recent_prices_excludes_non_fulfilled(self):
-        ledger = Ledger()
+        ledger = TradeHistory()
         o = Order(
             order_id="f",
             seller_id=1,
@@ -221,7 +221,7 @@ class TestLedger:
         assert len(result[1]) == 1
 
     def test_mixed_records_avg_price_correct(self):
-        ledger = Ledger()
+        ledger = TradeHistory()
         prices = []
         for i in range(20):
             o = Order(

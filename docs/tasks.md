@@ -563,6 +563,602 @@ class WorldBuilder:
 
 ```
 1(entities) ─→ 2(ledger+noise) ─→ 3a(clearing part1) ─→ 3b(clearing part2) ─→ 4(reporter) ─→ 5(simulator kernel) ─→ 6(strategies) ─→ 7(obs→MI refactor) ─→ 8(registry→Engine) ─→ 9(data layer)
+                                                                                                                                                                                                             │
+                                                                                                                                                                                                             └─→ 10(labels) ─→ 11(market) ─→ 12(apply dispatch) ─→ 13(examples+readme)
 ```
 
 每轮严格按顺序执行，前一轮全部打勾才进入下一轮。
+
+---
+
+## 10. labels 字段迁移：`strategy_label: str` → `labels: List[str]`
+
+**产出**：修改 `core/entities.py`、`core/data_layer.py`、`core/engine.py`、`core/simulator.py`；适配 `core/*_test.py`；修改 `examples/generate_town.py`、`examples/town.py`；重新生成 `town_world.db`、`config/seed_world.db`
+
+**依据**：`docs/strategy-design.md` §labels 字段
+
+**动机**：
+
+- 当前 `strategy_label` 是单字符串，一个实体只能匹配一个 `apply()` 调用
+- 新设计改为 `labels: List[str]`，一个企业可以同时属于 `["steel", "tech"]`，两个 label 的 `apply()` 都能命中它
+- `apply()` 匹配规则：`label in entity.labels`
+- 字段名从 `strategy_label` 改为 `labels`（去掉冗余的 strategy 前缀），更精准
+
+**DB 存储格式**：逗号分隔字符串，如 `"steel,tech"`。加载时 `split(",")` 还原为 list，保存时 `",".join(labels)`。
+
+---
+
+### 10.1 修改 `core/entities.py`
+
+- [x] 10.1.1 `Firm` dataclass 第 45 行：`strategy_label: str = "default"` → `labels: List[str] = field(default_factory=lambda: ["default"])`
+- [x] 10.1.2 `Household` dataclass 第 68 行：同上
+- [x] 10.1.3 `Government` dataclass 第 89 行：同上
+
+---
+
+### 10.2 修改 `core/data_layer.py` — WorldLoader.load()
+
+修改三处 SQL 查询和对应的加载逻辑（列名 `strategy_label` → `labels`，存为逗号分隔字符串，解析为 list）：
+
+- [x] 10.2.1 行 87：`SELECT id, cash, capacity, collateral, is_active, labels FROM firms`（列名改为 labels）
+- [x] 10.2.2 行 100-101：`if "labels" in cols: kwargs["labels"] = row_dict["labels"].split(",")`（读取后 split 为 list）
+- [x] 10.2.3 行 118-119：`SELECT ... labels FROM households`
+- [x] 10.2.4 行 133-134：`if "labels" in cols: kwargs["labels"] = row_dict["labels"].split(",")`
+- [x] 10.2.5 行 145-146：`SELECT ... labels FROM governments`
+- [x] 10.2.6 行 159-160：`if "labels" in cols: kwargs["labels"] = row_dict["labels"].split(",")`
+
+---
+
+### 10.3 修改 `core/data_layer.py` — WorldBuilder
+
+- [x] 10.3.1 `add_firm()` 签名行 222：`strategy_label: str = "default"` → `labels: List[str] = None`，方法体内 `if labels is None: labels = ["default"]`
+- [x] 10.3.2 `add_firm()` 行 230：`Firm(... strategy_label=strategy_label)` → `Firm(... labels=labels)`
+- [x] 10.3.3 `add_household()` 签名行 252：同上
+- [x] 10.3.4 `add_household()` 行 260：同上
+- [x] 10.3.5 `add_government()` 签名行 276：同上
+- [x] 10.3.6 `add_government()` 行 283：同上
+
+---
+
+### 10.4 修改 `core/data_layer.py` — WorldBuilder.save() DDL + INSERT
+
+- [x] 10.4.1 行 326（firms DDL）：`strategy_label TEXT NOT NULL DEFAULT 'default'` → `labels TEXT NOT NULL DEFAULT 'default'`
+- [x] 10.4.2 行 349（households DDL）：同上
+- [x] 10.4.3 行 365（governments DDL）：同上
+- [x] 10.4.4 行 376（firms INSERT）：列名 `strategy_label` → `labels`，值 `f.strategy_label` → `",".join(f.labels)`
+- [x] 10.4.5 行 395-396（households INSERT）：列名 `strategy_label` → `labels`，值 `hh.strategy_label` → `",".join(hh.labels)`
+- [x] 10.4.6 行 413-414（governments INSERT）：列名 `strategy_label` → `labels`，值 `gov.strategy_label` → `",".join(gov.labels)`
+
+---
+
+### 10.5 修改 `core/engine.py`
+
+- [x] 10.5.1 `_Slot.use()` 方法行 27：签名 `use(self, label: str, mi, entity, goods, orders)` → 保留（仅为兼容过渡，Round 12 会被删除）
+- [x] 10.5.2 `_Slot.label()` 装饰器行 19-24：保留（仅为兼容过渡，Round 12 会被删除）
+- [x] 10.5.3 注意：`Engine` 类本身不做 labels 相关变更
+
+---
+
+### 10.6 修改 `core/simulator.py`
+
+- [x] 10.6.1 行 140-141：`my_orders = firm.outstanding_orders(state.all_orders)` 不变，无需修改（引擎遍历逻辑 Round 10 不动）
+- [x] 10.6.2 无需修改 `_execute_strategy`（当前仍是 per-entity 遍历，只是字段名改了，Round 12 才重写）
+
+---
+
+### 10.7 修改 `core/simulator_test.py`
+
+- [x] 10.7.1 行 47（测试 DB schema）：`strategy_label TEXT` → `labels TEXT`
+- [x] 10.7.2 行 67（测试 DB schema）：同上
+- [x] 10.7.3 行 81（测试 DB schema）：同上
+- [x] 10.7.4 所有构造 `Firm(... strategy_label=...)` 的测试 → `Firm(... labels=["farm"])`
+- [x] 10.7.5 所有 `assert firm.strategy_label == "farm"` → `assert "farm" in firm.labels`
+
+---
+
+### 10.8 修改 `core/data_layer_test.py`
+
+- [x] 10.8.1 行 78：`strategy_label="farm"` → `labels=["farm"]`
+- [x] 10.8.2 行 89：`strategy_label="default"` → `labels=["default"]`
+- [x] 10.8.3 行 103：`assert ws.firms[1].strategy_label == "farm"` → `assert "farm" in ws.firms[1].labels`
+- [x] 10.8.4 行 113：同上风格修改
+- [x] 10.8.5 行 146, 154：同上
+- [x] 10.8.6 行 175, 178：`strategy_label == "farm"` → `"farm" in labels`
+- [x] 10.8.7 行 225-236：测试名称和默认值断言改为 `labels == ["default"]`
+
+---
+
+### 10.9 修改 `core/engine_test.py`
+
+- [x] 10.9.1 所有测试中构造的 Firm/Household/Government 实例 `strategy_label="..."` → `labels=["..."]`
+- [x] 10.9.2 所有 `assert entity.strategy_label == ...` → `assert "..." in entity.labels`
+
+---
+
+### 10.10 修改 `core/entities_test.py`
+
+- [x] 10.10.1 所有 Firm/Household/Government 构造中 `strategy_label=...` → `labels=[...]`
+- [x] 10.10.2 默认值测试改为 `assert firm.labels == ["default"]`
+
+---
+
+### 10.11 修改 `core/reporter_test.py`
+
+- [x] 10.11.1 如果有直接构造实体实例的地方（Household 等），`strategy_label` → `labels`（该文件大概率不涉及——Reporter 不读 strategy_label）
+
+---
+
+### 10.12 修改 `examples/generate_town.py`
+
+- [x] 10.12.1 行 21：`strategy_label="farm"` → `labels=["farm"]`
+- [x] 10.12.2 行 29：`strategy_label="workshop"` → `labels=["workshop"]`
+
+---
+
+### 10.13 修改 `examples/town.py`
+
+- [x] 10.13.1 行 33：`ese.firm.use(firm.strategy_label, ...)` → `ese.firm.use(firm.labels[0], ...)`（取第一个 label 作为分发目标，仅过渡；Round 13 会重写整个文件）
+
+---
+
+### 10.14 重新生成数据库
+
+- [x] 10.14.1 运行 `uv run python examples/generate_town.py` 重新生成 `examples/town_world.db`
+- [x] 10.14.2 如果有 `config/seed_world.db`，也重新生成
+
+---
+
+### 10.15 验证
+
+- [x] 10.15.1 `uv run pytest core/ -v` 全绿
+- [x] 10.15.2 `uv run python examples/town.py` → 正常跑完 50 tick，输出 CSV/图表
+
+---
+
+## 11. market 命名空间迁移：supply_pool/demand_pool/ledger → market.supply/demand/history
+
+**产出**：修改 `core/entities.py`、`core/simulator.py`、`core/clearing_house.py`、`core/market_intelligence.py`、`core/reporter.py`、`core/engine.py`、`core/ledger.py`；适配全部 `core/*_test.py`
+
+**依据**：`docs/strategy-design.md` §market 命名空间
+
+**动机**：
+
+- 三个散落的变量名（`supply_pool`、`demand_pool`、`ledger`）对用户不直观
+- 统合在 `market` 对象下，一个入口查完所有市场数据：`market.supply`、`market.demand`、`market.history`
+- 语义对称，supply/demand 天然对应卖和买
+- `ledger.py` 中的 `Ledger` 类重命名为 `TradeHistory` 并入 `market` 体系
+
+**设计**：
+- 新增 `MarketData` 类（或在 `WorldState` 上直接挂 `market` 属性），持有 `supply: List[Order]`、`demand: List[Order]`、`history: TradeHistory`
+- `TradeHistory` 是原 `Ledger` 类的重命名，接口不变（`record_trade`、`get_trades_by_agent`、`get_avg_price_by_good`、`get_all_recent_prices`）
+- `WorldState` 字段 `supply_pool`、`demand_pool` 删除（移入 `market.supply`、`market.demand`）
+- 全局替换所有代码中对 `state.supply_pool`、`state.demand_pool`、`self.ledger` 的引用
+
+---
+
+### 11.1 修改 `core/ledger.py`：Ledger → TradeHistory
+
+- [x] 11.1.1 `class Ledger` → `class TradeHistory`（仅改名，接口完全不变）
+- [x] 11.1.2 文件名不重命名（避免 touch 太多 import），`core/ledger.py` 保持原文件名
+
+---
+
+### 11.2 修改 `core/entities.py` — WorldState 字段
+
+- [x] 11.2.1 行 198-199：删除 `supply_pool: List[Order]` 和 `demand_pool: List[Order]` 两个字段
+- [x] 11.2.2 在 `WorldState` 上新增 `market` 属性。由于 `WorldState` 是 `@dataclass`，在 `__post_init__` 中初始化：
+  ```python
+  @dataclass
+  class WorldState:
+      tick: int
+      firms: Dict[int, Firm] = ...
+      ...
+      # 新增
+      market: "MarketData" = field(default=None)  # __post_init__ 中初始化
+
+      def __post_init__(self):
+          if self.market is None:
+              self.market = MarketData()
+  ```
+- [x] 11.2.3 在 `entities.py` 底部新增 `MarketData` 类：
+  ```python
+  @dataclass
+  class MarketData:
+      supply: List[Order] = field(default_factory=list)
+      demand: List[Order] = field(default_factory=list)
+      history: "TradeHistory" = field(default_factory=lambda: _get_trade_history())
+  ```
+  **⚠️ 循环导入处理**：`ledger.py` 已有 `from core.entities import Order`。若 `entities.py` 顶层 `from core.ledger import TradeHistory` 会造成循环导入。解决方案：
+  - `MarketData.history` 字段用**字符串标注** `"TradeHistory"` + `field(default_factory=...)` 延迟导入
+  - 在 `entities.py` 定义 `_get_trade_history()` 辅助函数，内部局部 `from core.ledger import TradeHistory`
+  - 不在 `entities.py` 顶层 import `TradeHistory`，仅用在类型标注的字符串引用和延迟 factory 中
+- [x] 11.2.4 `ese/__init__.py` 新增 `from core.entities import MarketData`
+
+---
+
+### 11.3 修改 `core/simulator.py`：全局替换 supply_pool / demand_pool / ledger
+
+**Simulator.__init__：**
+
+- [x] 11.3.1 行 8：`from core.ledger import Ledger` → `from core.ledger import TradeHistory`
+- [x] 11.3.2 行 17：`self.ledger = Ledger()` → 删除这行，不再单独持有 ledger
+- [x] 11.3.3 **⚠️ 调整初始化顺序**：`self.state` 必须移到 `self.clearing` 之前创建，因为 `ClearingHouse` 构造函数需要 `self.state.market.history`：
+  ```python
+  # 新顺序（仅列出有改动的行）：
+  self.config = self._load_config(config_path)
+  self.noise = InformationFriction(...)
+  self.reporter = Reporter()
+  self._id_seq = Sequence()
+  self.order_factory = OrderFactory(self._id_seq)
+  self.state = WorldLoader.load(world_db_path)       # ← 移到前面
+  self.clearing = ClearingHouse(                     # ← 此时 self.state 已存在
+      ledger=self.state.market.history, ...)
+  self.order_expire_ticks = ...
+  self.mi_builder = MarketIntelligenceBuilder(...)
+  self.mi = self.mi_builder.build(self.state, self.state.market.history)
+  self._reg = strategy_registry
+  ```
+  > **若不调整顺序，`ClearingHouse(ledger=self.state.market.history, ...)` 会在 `self.state` 赋值前执行，触发 `AttributeError: 'Simulator' object has no attribute 'state'`。**
+- [x] 11.3.4 行 32：`self.mi_builder.build(self.state, self.ledger)` → `self.mi_builder.build(self.state, self.state.market.history)`
+
+**tick() 方法：**
+
+- [x] 11.3.5 行 69：`self.mi_builder.build(state, self.ledger)` → `self.mi_builder.build(state, state.market.history)`
+
+**run() 方法：**
+
+- [x] 11.3.6 行 77：`self.reporter.snapshot(self.state, self.ledger)` → `self.reporter.snapshot(self.state, self.state.market.history)`
+
+**_add_new_order() 方法：**
+
+- [x] 11.3.7 行 201：`state.supply_pool.append(order)` → `state.market.supply.append(order)`
+- [x] 11.3.8 行 203：`state.demand_pool.append(order)` → `state.market.demand.append(order)`
+
+**_cancel_order() 方法：**
+
+- [x] 11.3.9 行 212：`self.ledger.record_trade(order)` → `state.market.history.record_trade(order)`
+- [x] 11.3.10 行 214-217：`if order in state.supply_pool: state.supply_pool.remove(order)` → `if order in state.market.supply: state.market.supply.remove(order)`
+- [x] 11.3.11 行 216-217：`state.demand_pool` → `state.market.demand`
+
+**_execute_allocation() 方法：**
+
+- [x] 11.3.12 行 228-229：`list(state.supply_pool)` → `list(state.market.supply)`，`list(state.demand_pool)` → `list(state.market.demand)`
+- [x] 11.3.13 行 234-235：`state.supply_pool = remaining_supply` → `state.market.supply = remaining_supply`，`state.demand_pool = remaining_demand` → `state.market.demand = remaining_demand`
+- [x] 11.3.14 行 244：`self.ledger.record_trade(order)` → `state.market.history.record_trade(order)`
+
+**_execute_strategy() 方法：**
+
+- [x] 11.3.15 行 140-143：引擎内部遍历逻辑不变（Round 10 的 per-entity 循环不改）
+- [x] 11.3.16 但仍需确保 `firm.outstanding_orders(state.all_orders)` 正确工作——该函数用 `outstanding_order_ids` 在 `all_orders` 中查找，不依赖 pool 命名
+
+---
+
+### 11.4 修改 `core/clearing_house.py`
+
+- [x] 11.4.1 行 5：`from core.ledger import Ledger` → `from core.ledger import TradeHistory`
+- [x] 11.4.2 行 11：`ledger: Ledger` → `ledger: TradeHistory`
+- [x] 11.4.3 行 15：`self.ledger = ledger` → `self.ledger = ledger`（变量名保持 self.ledger，不变——因为 ClearingHouse 内部可以继续叫 ledger，它不暴露给用户）
+- [x] 11.4.4 全文搜索 `state.supply_pool` 和 `state.demand_pool`：
+  - `liquidate_firm()` 中如果有池操作 → `state.market.supply` / `state.market.demand`
+  - `expire_stale_orders()` 中遍历的池 → `state.market.supply` / `state.market.demand`
+- [x] 11.4.5 全文搜索 `self.ledger.record_trade`：不变（清除器内部仍叫 `self.ledger`，只是对象类型变成了 `TradeHistory`）
+
+---
+
+### 11.5 修改 `core/market_intelligence.py`
+
+- [x] 11.5.1 行 6：`from core.ledger import Ledger` → `from core.ledger import TradeHistory`
+- [x] 11.5.2 所有方法签名中的 `ledger: Ledger` → `ledger: TradeHistory`
+- [x] 11.5.3 行 42-43：`self._aggregate_pool(state.supply_pool, ...)` → `self._aggregate_pool(state.market.supply, ...)`
+- [x] 11.5.4 行 43-44：`state.demand_pool` → `state.market.demand`
+
+---
+
+### 11.6 修改 `core/reporter.py`
+
+- [x] 11.6.1 行 35：类型标注 `ledger: "Ledger"` → `ledger: "TradeHistory"`（字符串引用不变因为 ledger.py 不重命名）
+- [x] 11.6.2 行 75：`snapshot(state, ledger)` 签名中类型标注同上
+
+---
+
+### 11.7 修改 `core/data_layer.py` — WorldLoader.load() 和 WorldBuilder.build()
+
+- [x] 11.7.1 `WorldLoader.load()` 行 185-186：构造 `WorldState(... supply_pool=[], demand_pool=[], ...)` → **删除 `supply_pool` 和 `demand_pool` 参数**。由于 `WorldState.__post_init__` 会在无 market 时自动创建 `MarketData()`，load 方法不需要手动传入。
+  > **⚠️ 如果忘记删除这两个参数，会报 `TypeError: __init__() got an unexpected keyword argument 'supply_pool'`，因为 dataclass 字段已删除。**
+- [x] 11.7.2 `WorldBuilder.build()` 行 287-294：同上删除 `supply_pool=[], demand_pool=[]`，同理会触发 TypeError
+
+---
+
+### 11.8 修改 `core/engine.py`
+
+- [x] 11.8.1 全部不变——Engine 不直接引用 supply_pool / demand_pool / ledger
+
+---
+
+### 11.9 修改 `ese/__init__.py`
+
+- [x] 11.9.1 `from core.ledger import Ledger` → 删除（不再公开导出旧的 Ledger 类名）
+- [x] 11.9.2 保持现有导出：`Engine`, `Firm`, `Good`, `Government`, `Household`, `Order`, `OrderSide`, `WorldState`, `MarketIntelligence`, `WorldBuilder`, `MarketData`
+
+---
+
+### 11.10 适配所有 `core/*_test.py`
+
+- [x] 11.10.1 `core/ledger_test.py`：所有 `Ledger()` → `TradeHistory()`，所有 `from core.ledger import Ledger` → `from core.ledger import TradeHistory`
+- [x] 11.10.2 `core/clearing_house_test.py`：全局替换 `state.supply_pool` → `state.market.supply`，`state.demand_pool` → `state.market.demand`，`Ledger()` → `TradeHistory()`
+- [x] 11.10.3 `core/simulator_test.py`：全局同上替换
+- [x] 11.10.4 `core/reporter_test.py`：`Ledger()` → `TradeHistory()`
+- [x] 11.10.5 `core/market_intelligence_test.py`（如独立文件）或 `simulator_test.py` 中的 MI 测试：同上
+- [x] 11.10.6 `core/entities_test.py`：测试 `MarketData` 构造，测试 `WorldState.__post_init__` 自动创建 `market`
+- [x] 11.10.7 `core/data_layer_test.py`：`supply_pool` / `demand_pool` 相关测试适配
+
+---
+
+### 11.11 验证
+
+- [x] 11.11.1 `uv run pytest core/ -v` 全绿
+- [x] 11.11.2 `uv run python examples/town.py` → 正常跑完 50 tick
+
+---
+
+## 12. apply() + 宏函数调度：引擎改为每 slot 调一次宏函数
+
+**产出**：修改 `core/simulator.py`、`core/engine.py`、`core/_registry.py`；适配 `core/engine_test.py`、`core/simulator_test.py`
+
+**依据**：`docs/strategy-design.md` §apply() 核心语义
+
+**动机**：
+
+- 当前引擎在 `_execute_strategy` 中按 F→H→G 顺序，**逐实体**调用注册的 primary 策略函数（per-entity 遍历）
+- 新设计：引擎改为每个 slot 只调一次宏函数，传参 `(mi, goods)`，不在引擎层遍历实体
+- 迭代权交给用户，在宏函数内部通过 `apply()` 分发到实体
+- `apply(label, leaf_fn, **params)` 内部做：筛选实体（`label in entity.labels`）→ 构造 AgentOrders → 调 leaf_fn → 汇总返回值
+- 叶子函数是普通 Python 函数，不注册、不装装饰器，由 `apply()` 直接传入实体实例
+
+**宏函数新签名：**
+
+| 旧签名 | 新签名 |
+|--------|--------|
+| `firm_fn(mi, entity, goods, orders)` | `firm_macro(mi, goods)` |
+| `hh_fn(mi, entity, goods, orders)` | `hh_macro(mi, goods)` |
+| `gov_fn(mi, entity, goods, orders)` | `gov_macro(mi, goods)` |
+
+**`apply()` 完整实现（位于 `engine._Slot`）：**
+
+依赖注入说明：`_Slot.__init__` 除 `_get_entities_fn` 外，还需额外接收 `simulator: Simulator` 引用，从而在 `apply()` 内部取到 `state`、`order_factory`、`_dispatch_agent_result` 三个关键依赖。
+
+```python
+def apply(self, label: str, leaf_fn, **params):
+    state = self._sim.state                     # ← 通过 simulator 引用取 state
+    results = []
+    for entity in self._get_entities():
+        if hasattr(entity, 'is_active') and not entity.is_active:
+            continue                            # 跳过已退出实体（Firm）
+        if label not in entity.labels:
+            continue                            # label 不匹配则跳过
+        my_orders = entity.outstanding_orders(state.all_orders)
+        orders = AgentOrders(my_orders, self._sim.order_factory)  # ← 通过 simulator 取 order_factory
+        result = leaf_fn(entity, orders, **params)
+        results.append(result)
+        self._sim._dispatch_agent_result(state, orders._consume())  # ← 通过 simulator 调 dispatch
+    return results
+```
+
+---
+
+### 12.1 修改 `core/_registry.py`：去掉 labeled 字典
+
+- [ ] 12.1.1 `_Slot` 类：
+  - 删除 `self.labeled: Dict[str, Callable] = {}`（行 8）
+  - 删除 `set_labeled(label, func)` 方法（行 13-14）
+  - `get()` 方法简化为 `def get(self) -> Optional[Callable]: return self.primary`（去掉 label 参数）
+- [ ] 12.1.2 `_StrategyRegistry` 类：
+  - 删除 `set_labeled(slot, label, func)` 方法（行 35-36）
+  - `get(slot, label=None)` → `get(slot)`（去掉 label 参数，返回 primary）
+
+---
+
+### 12.2 修改 `core/engine.py`：去掉 label()/.use()，新增 apply()
+
+- [ ] 12.2.1 `_Slot` 类：
+  - 删除 `.label(label)` 装饰器方法（行 19-24）
+  - 删除 `.use(label, mi, entity, goods, orders)` 分发方法（行 26-35）
+  - `__init__` 签名改为 `__init__(self, registry, slot_name, get_entities_fn, simulator)`：
+    - `get_entities_fn: Callable` — 闭包，返回该 slot 类型的实体列表（由 Engine 注入 lambda）
+    - `simulator: Simulator` — 提供 `state`（WorldState）、`order_factory`（OrderFactory）、`_dispatch_agent_result()` 三个关键依赖
+  - 新增 `apply(label, leaf_fn, **params)` 方法，完整实现见上文"动机"节
+- [ ] 12.2.2 `Engine.__init__` 创建 `_Slot` 时注入两个依赖：
+  ```python
+  self.firm = _Slot(self._registry, "firm",
+      get_entities_fn=lambda: list(self._simulator.state.firms.values()),
+      simulator=self._simulator)
+
+  self.household = _Slot(self._registry, "household",
+      get_entities_fn=lambda: list(self._simulator.state.households.values()),
+      simulator=self._simulator)
+
+  # government 只有一个实例，直接取（gov 宏函数内手动访问 state.governments.values()）
+  self.government = _Slot(self._registry, "government",
+      get_entities_fn=lambda: list(self._simulator.state.governments.values()),
+      simulator=self._simulator)
+  ```
+  > **注意**：`get_entities_fn` 用 `list()` 包裹 `dict_values` 视图，确保多次迭代结果一致（虽然 Round 10-12 不会在迭代中增删实体，但 `list()` 是安全惯例）。
+- [ ] 12.2.3 `_AllocationSlot` 类：
+  - `__init__` 改为 `__init__(self, registry, get_entities_fn, simulator)`，不再固定 `slot_name="allocation"`
+  - 其余保持不变（`.pricing` 属性、`super().__init__` 委托）
+- [ ] 12.2.4 `Engine.__init__` 创建 `_AllocationSlot` 时注入：
+  ```python
+  self.allocation = _AllocationSlot(self._registry,
+      get_entities_fn=lambda: None,  # allocation slot 不需要实体迭代
+      simulator=self._simulator)
+  ```
+
+---
+
+### 12.3 修改 `core/simulator.py`：重写 `_execute_strategy`
+
+- [ ] 12.3.1 删除当前逐实体遍历的 `_execute_strategy` 方法（行 134-159）
+- [ ] 12.3.2 新 `_execute_strategy(self, mi, state)`：
+  ```python
+  def _execute_strategy(self, mi, state):
+      # Firm 宏函数
+      firm_fn = self._reg.get("firm") if self._reg else None
+      if firm_fn is not None:
+          firm_fn(mi, state.goods)  # 宏函数签名: (mi, goods)
+
+      # Household 宏函数
+      hh_fn = self._reg.get("household") if self._reg else None
+      if hh_fn is not None:
+          hh_fn(mi, state.goods)
+
+      # Government 宏函数
+      gov_fn = self._reg.get("government") if self._reg else None
+      if gov_fn is not None:
+          gov_fn(mi, state.goods)
+  ```
+  **关键**：引擎不再构造 AgentOrders、不再遍历实体、不再调用 `_dispatch_agent_result`。这些全部由 `apply()` 在宏函数内部完成。
+- [ ] 12.3.3 保留 `_dispatch_agent_result` 方法不变（`apply()` 内部调用它）
+- [ ] 12.3.4 保留 `_add_new_order` 和 `_cancel_order` 方法不变
+
+---
+
+### 12.4 适配 `core/engine_test.py`
+
+- [ ] 12.4.1 测试 `_Slot.__call__` 注册仍有效（primary 策略注册）
+- [ ] 12.4.2 删除所有测试 `.label()` 的测试用例
+- [ ] 12.4.3 删除所有测试 `.use()` 的测试用例
+- [ ] 12.4.4 新增测试 `_Slot.apply()`：注入假实体列表 → 调 apply("tag", fn) → 验证 fn 被调用、返回值正确汇总
+- [ ] 12.4.5 新增测试 `apply()` 在 `label in entity.labels` 不匹配时跳过对应实体
+
+---
+
+### 12.5 适配 `core/simulator_test.py`
+
+- [ ] 12.5.1 所有测试用例中的 `_execute_strategy` 调用预期行为更新：
+  - 注册一个宏函数（收 `(mi, goods)` 参数），宏函数内部调 `apply()`
+  - 宏函数不再接收 entity 参数
+- [ ] 12.5.2 删除所有依赖于逐实体调用策略的旧测试断言
+- [ ] 12.5.3 新增测试：分配策略调用不受影响（`_execute_allocation` 逻辑不变）
+
+---
+
+### 12.6 验证
+
+- [ ] 12.6.1 `uv run pytest core/ -v` 全绿
+- [ ] 12.6.2 不需要端到端跑 town.py（Round 12 结束时 town.py 还是旧写法 = 会崩溃，属于预期，Round 13 修复）
+
+---
+
+## 13. examples + readme 重写：适配新的 apply() 架构
+
+**产出**：重写 `examples/town.py`；修改 `examples/generate_town.py`（labels 最终确认）；修改 `readme.md`；重新生成数据库
+
+**依据**：`docs/strategy-design.md` §1.市场
+
+**动机**：
+
+- Round 12 改造完成后，引擎只调宏函数，旧的 `ese.firm.use()` / `@ese.firm.label()` 写法全部失效
+- `town.py` 必须重写为宏函数 + `apply()` + 普通叶子函数的风格
+- `readme.md` 的代码示例和文档说明同步更新
+- 端到端验证整个改造链路
+
+---
+
+### 13.1 重写 `examples/town.py`
+
+**新的文件结构：**
+
+- [ ] 13.1.1 初始化：`ese = Engine(...)` 不变
+- [ ] 13.1.2 叶子函数（普通 Python 函数，无装饰器）：
+  ```python
+  def farm_decide(firm, orders):
+      # 生产：1 工具 → 5 食物
+      if firm.inventory.get(2, 0) >= 1.0:
+          firm.inventory[2] -= 1.0
+          firm.inventory[1] = firm.inventory.get(1, 0) + 5.0
+      # 挂单卖食物
+      if firm.inventory.get(1, 0) > 2.0:
+          orders.new(seller_id=firm.id, buyer_id=0, good_id=1, ...)
+      # 采购工具
+      if firm.cash > 50 and firm.inventory.get(2, 0) < 10:
+          orders.new(seller_id=0, buyer_id=firm.id, good_id=2, ...)
+
+  def workshop_decide(firm, orders):
+      # 类似，2 食物 → 3 工具
+      ...
+
+  def household_spend(hh, orders):
+      budget = hh.cash * 0.2
+      if budget < 0.5:
+          return
+      orders.new(seller_id=0, buyer_id=hh.id, good_id=1, ...)
+      orders.new(seller_id=0, buyer_id=hh.id, good_id=2, ...)
+  ```
+- [ ] 13.1.3 宏函数（带 `@ese.firm` 等装饰器）：
+  ```python
+  @ese.firm
+  def market(mi, goods):
+      ese.firm.apply("farm", farm_decide)
+      ese.firm.apply("workshop", workshop_decide)
+
+  @ese.household
+  def consumption(mi, goods):
+      ese.household.apply("default", household_spend)
+
+  @ese.government
+  def minimal_gov(mi, goods):
+      gov = list(ese._simulator.state.governments.values())[0]
+      # 税率和失业金在种子数据库已设定，不动
+  ```
+- [ ] 13.1.4 分配和定价策略：保持不变（`@ese.allocation`、`@ese.allocation.pricing` 不变）
+- [ ] 13.1.5 删除所有 `@ese.firm.label(...)` 和 `ese.firm.use(...)` 调用
+- [ ] 13.1.6 运行和输出：`snapshots = ese.run(n_ticks=50)` + `ese.save(...)` 不变
+
+---
+
+### 13.2 修改 `examples/generate_town.py`
+
+- [ ] 13.2.1 确认 `labels=["farm"]` 和 `labels=["workshop"]` 参数正确
+- [ ] 13.2.2 Household 不指定 labels（默认 `["default"]`），`apply("default", fn)` 命中
+- [ ] 13.2.3 重新生成 `dir/town_world.db`：`uv run python examples/generate_town.py`
+
+---
+
+### 13.3 重写 `readme.md`
+
+- [ ] 13.3.1 §2.5 "策略的调度机制" 整段重写：
+  - 删除 `@ese.firm.label()` 和 `ese.firm.use()` 相关说明
+  - 改为宏函数 + `apply()` + 叶子函数的说明
+  - 更新代码示例
+- [ ] 13.3.2 §4.4 策略编写示例全部重写为宏函数 + apply 风格：
+  ```python
+  # 叶子：无装饰器的普通函数
+  def farm(firm, orders):
+      if firm.inventory.get(2, 0) >= 1.0:
+          firm.inventory[2] -= 1.0
+          firm.inventory[1] = firm.inventory.get(1, 0) + 5.0
+      orders.new(seller_id=firm.id, buyer_id=0, good_id=1, ...)
+
+  def workshop(firm, orders):
+      ...
+
+  # 宏函数
+  @ese.firm
+  def market(mi, goods):
+      ese.firm.apply("farm", farm)
+      ese.firm.apply("workshop", workshop)
+  ```
+- [ ] 13.3.3 删除所有 `@ese.firm.label("farm")` 和 `@ese.household.label(...)` 示例
+- [ ] 13.3.4 §1 "企业（Firm）" 描述：`strategy_label` → `labels`
+- [ ] 13.3.5 分配策略和定价策略相关描述保持不变
+- [ ] 13.3.6 §4.2 世界生成示例中 `strategy_label="farm"` → `labels=["farm"]`
+- [ ] 13.3.7 ALL references to `strategy_label` → `labels`
+
+---
+
+### 13.4 端到端验证
+
+- [ ] 13.4.1 `uv run pytest core/ -v` 全部 170+ 测试通过
+- [ ] 13.4.2 `uv run python examples/generate_town.py` → 正常生成 town_world.db
+- [ ] 13.4.3 `uv run python examples/town.py` → 正常跑完 50 tick，输出 CSV/图表
+- [ ] 13.4.4 检查 `examples/results/town_results.csv` 包含 50 行数据，`town_results.png` 包含 gini、unemployment、engel、active_firms 四个子图

@@ -18,7 +18,7 @@ if os.path.exists(DB_PATH):
         101,
         1000.0,
         capacity=50.0,
-        strategy_label="farm",
+        labels=["farm"],
         inventory={1: 20.0, 2: 5.0},
         employees=[1, 2, 3],
     )
@@ -26,7 +26,7 @@ if os.path.exists(DB_PATH):
         102,
         1000.0,
         capacity=30.0,
-        strategy_label="workshop",
+        labels=["workshop"],
         inventory={1: 10.0, 2: 15.0},
         employees=[4, 5],
     )

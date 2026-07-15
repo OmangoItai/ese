@@ -1,7 +1,7 @@
 import pytest
 from core.reporter import Reporter
 from core.entities import Household, Good, Firm, Government, WorldState, Order
-from core.ledger import Ledger
+from core.ledger import TradeHistory
 
 
 class TestCalcGini:
@@ -69,7 +69,7 @@ class TestCalcEngel:
         }
         households = {1: Household(id=1, cash=1000.0)}
 
-        ledger = Ledger()
+        ledger = TradeHistory()
         for i in range(5):
             o = Order(
                 order_id=f"food_{i}",
@@ -101,7 +101,7 @@ class TestCalcEngel:
         goods = {1: Good(good_id=1, name="bread", good_type="food")}
         households = {1: Household(id=1, cash=1000.0)}
 
-        ledger = Ledger()
+        ledger = TradeHistory()
         for i in range(3):
             o = Order(
                 order_id=f"f{i}",
@@ -124,7 +124,7 @@ class TestCalcEngel:
         }
         households = {1: Household(id=1, cash=1000.0)}
 
-        ledger = Ledger()
+        ledger = TradeHistory()
         for i in range(3):
             o = Order(
                 order_id=f"n{i}",
@@ -143,7 +143,7 @@ class TestCalcEngel:
     def test_empty_ledger_returns_zero(self):
         goods = {1: Good(good_id=1, name="bread", good_type="food")}
         households = {1: Household(id=1, cash=1000.0)}
-        ledger = Ledger()
+        ledger = TradeHistory()
         engel = Reporter.calc_engel(households, goods, ledger)
         assert engel == 0.0
 
@@ -154,7 +154,7 @@ class TestCalcEngel:
         }
         households = {1: Household(id=1, cash=1000.0)}
 
-        ledger = Ledger()
+        ledger = TradeHistory()
         o_food = Order(
             order_id="ff",
             seller_id=2,
@@ -186,7 +186,7 @@ class TestCalcEngel:
         }
         households = {1: Household(id=1, cash=1000.0)}
 
-        ledger = Ledger()
+        ledger = TradeHistory()
         o_old_food = Order(
             order_id="old_f",
             seller_id=1,
@@ -215,7 +215,7 @@ class TestCalcEngel:
     def test_zero_total_expenditure_returns_zero(self):
         goods = {1: Good(good_id=1, name="bread", good_type="food")}
         households = {1: Household(id=1, cash=1000.0)}
-        ledger = Ledger()
+        ledger = TradeHistory()
         o = Order(
             order_id="z",
             seller_id=1,
@@ -275,7 +275,7 @@ class TestSnapshot:
             governments=governments,
             goods=goods,
         )
-        ledger = Ledger()
+        ledger = TradeHistory()
 
         snap = Reporter.snapshot(state, ledger)
 
@@ -303,7 +303,7 @@ class TestSnapshot:
             2: Firm(id=2, cash=500.0, is_active=False),
         }
         state = WorldState(tick=0, firms=firms, goods=goods)
-        ledger = Ledger()
+        ledger = TradeHistory()
         snap = Reporter.snapshot(state, ledger)
         assert snap["active_firms"] == 1
         assert snap["total_firms"] == 2
@@ -318,7 +318,7 @@ class TestSnapshot:
             4: Household(id=4, cash=100.0, is_employed=True),
         }
         state = WorldState(tick=0, households=households, goods=goods)
-        ledger = Ledger()
+        ledger = TradeHistory()
         snap = Reporter.snapshot(state, ledger)
         assert snap["gini"] == pytest.approx(0.0, abs=0.01)
         assert snap["unemployment"] == 0.4

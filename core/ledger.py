@@ -15,7 +15,7 @@ class TradeRecord:
     status: str
 
 
-class Ledger:
+class TradeHistory:
     def __init__(self):
         self.records: List[TradeRecord] = []
 

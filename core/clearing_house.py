@@ -2,13 +2,13 @@ from collections import deque
 from typing import Dict, List, Tuple, Union
 
 from core.entities import Firm, Household, Government, Good, Order, WorldState
-from core.ledger import Ledger
+from core.ledger import TradeHistory
 
 
 class ClearingHouse:
     def __init__(
         self,
-        ledger: Ledger,
+        ledger: TradeHistory,
         base_collateral_ratio: float = 0.1,
         fulfillment_window_ticks: int = 30,
     ):
@@ -540,10 +540,10 @@ class ClearingHouse:
             if order.status == "OPEN":
                 order.status = "CANCELLED"
                 self._release_counterparty(state, order, firm_id)
-                if order in state.supply_pool:
-                    state.supply_pool.remove(order)
-                if order in state.demand_pool:
-                    state.demand_pool.remove(order)
+                if order in state.market.supply:
+                    state.market.supply.remove(order)
+                if order in state.market.demand:
+                    state.market.demand.remove(order)
                 self.ledger.record_trade(order)
 
             elif order.status == "ALLOCATED":
@@ -582,13 +582,13 @@ class ClearingHouse:
 
     def expire_stale_orders(self, state: WorldState, expire_ticks: int) -> int:
         """池过期清理（设计 §3.2）。
-        遍历 supply_pool 和 demand_pool 中 status=OPEN 的订单，
+        遍历 market.supply 和 market.demand 中 status=OPEN 的订单，
         creation_tick + expire_ticks <= state.tick 则标记 EXPIRED、
         release_collateral 释放双方抵押金、移出池。
         返回被过期的订单总数。expire_ticks 由 config 配置（默认 30）。
         """
         expired_count = 0
-        for pool in [state.supply_pool, state.demand_pool]:
+        for pool in [state.market.supply, state.market.demand]:
             to_expire = []
             for order in pool:
                 if order.status == "OPEN" and (

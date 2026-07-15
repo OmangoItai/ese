@@ -75,7 +75,7 @@ class TestWorldBuilder:
             1,
             1000.0,
             capacity=50.0,
-            strategy_label="farm",
+            labels=["farm"],
             inventory={1: 10.0},
             employees=[1],
         )
@@ -86,7 +86,7 @@ class TestWorldBuilder:
             is_employed=True,
             employer_firm_id=1,
             inventory={1: 5.0},
-            strategy_label="default",
+            labels=["default"],
         )
         wb.add_government(1, 10000.0, tax_rate=0.1, unemployment_benefit=5.0)
         ws = wb.build()
@@ -100,7 +100,7 @@ class TestWorldBuilder:
         assert len(ws.firms) == 1
         assert ws.firms[1].cash == 1000.0
         assert ws.firms[1].capacity == 50.0
-        assert ws.firms[1].strategy_label == "farm"
+        assert "farm" in ws.firms[1].labels
         assert ws.firms[1].inventory == {1: 10.0}
         assert ws.firms[1].employees == [1]
 
@@ -110,7 +110,7 @@ class TestWorldBuilder:
         assert ws.households[1].is_employed is True
         assert ws.households[1].employer_firm_id == 1
         assert ws.households[1].inventory == {1: 5.0}
-        assert ws.households[1].strategy_label == "default"
+        assert "default" in ws.households[1].labels
 
         assert len(ws.governments) == 1
         assert ws.governments[1].cash == 10000.0
@@ -143,7 +143,7 @@ class TestWorldBuilder:
                     101,
                     1000.0,
                     capacity=50.0,
-                    strategy_label="farm",
+                    labels=["farm"],
                     inventory={1: 10.0, 2: 5.0},
                     employees=[1, 2],
                 )
@@ -151,7 +151,7 @@ class TestWorldBuilder:
                     102,
                     2000.0,
                     capacity=30.0,
-                    strategy_label="workshop",
+                    labels=["workshop"],
                     inventory={2: 20.0},
                 )
                 .add_household(
@@ -172,10 +172,10 @@ class TestWorldBuilder:
             assert ws.goods[1].delivery_lag == 2
             assert ws.goods[2].good_type == "raw_material"
             assert len(ws.firms) == 2
-            assert ws.firms[101].strategy_label == "farm"
+            assert "farm" in ws.firms[101].labels
             assert ws.firms[101].inventory == {1: 10.0, 2: 5.0}
             assert ws.firms[101].employees == [1, 2]
-            assert ws.firms[102].strategy_label == "workshop"
+            assert "workshop" in ws.firms[102].labels
             assert ws.firms[102].inventory == {2: 20.0}
             assert ws.firms[102].employees == []
             assert len(ws.households) == 2
@@ -222,7 +222,7 @@ class TestWorldBuilder:
         finally:
             os.unlink(db_path)
 
-    def test_builder_strategy_label_default(self):
+    def test_builder_labels_default(self):
         ws = (
             WorldBuilder()
             .add_good(1, "food", "food")
@@ -231,6 +231,6 @@ class TestWorldBuilder:
             .add_government(1, 1000.0)
             .build()
         )
-        assert ws.firms[1].strategy_label == "default"
-        assert ws.households[1].strategy_label == "default"
-        assert ws.governments[1].strategy_label == "default"
+        assert ws.firms[1].labels == ["default"]
+        assert ws.households[1].labels == ["default"]
+        assert ws.governments[1].labels == ["default"]

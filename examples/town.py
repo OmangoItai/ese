@@ -29,8 +29,8 @@ ese = Engine(
 
 @ese.firm
 def firm_orchestrator(mi: MarketIntelligence, firm, goods: Dict[int, Good], orders):
-    """调度器：按 strategy_label 分发到标签策略"""
-    ese.firm.use(firm.strategy_label, mi, firm, goods, orders)
+    """调度器：按 labels[0] 分发到标签策略"""
+    ese.firm.use(firm.labels[0], mi, firm, goods, orders)
 
 
 @ese.firm.label("farm")

@@ -3,6 +3,17 @@ from typing import Dict, List, Optional, Set, Tuple
 from collections import deque
 from enum import StrEnum
 
+__all__ = [
+    "OrderSide",
+    "Good",
+    "Order",
+    "Firm",
+    "Household",
+    "Government",
+    "AgentOrders",
+    "WorldState",
+]
+
 
 class OrderSide(StrEnum):
     SUPPLY = "supply"
@@ -42,7 +53,7 @@ class Firm:
     is_active: bool = True
     employees: List[int] = field(default_factory=list)
     outstanding_order_ids: Set[str] = field(default_factory=set)
-    strategy_label: str = "default"
+    labels: List[str] = field(default_factory=lambda: ["default"])
     _fulfillment_log: deque[Tuple[int, int, int]] = field(
         default_factory=lambda: deque(maxlen=30)
     )  # (fulfilled, defaulted, tick) 按 Tick 聚合，maxlen=30 常数内存
@@ -65,7 +76,7 @@ class Household:
     employer_firm_id: Optional[int] = None
     unemployment_ticks: int = 0
     outstanding_order_ids: Set[str] = field(default_factory=set)
-    strategy_label: str = "default"
+    labels: List[str] = field(default_factory=lambda: ["default"])
     _fulfillment_log: deque[Tuple[int, int, int]] = field(
         default_factory=lambda: deque(maxlen=30)
     )  # (fulfilled, defaulted, tick) 按 Tick 聚合，maxlen=30 常数内存
@@ -86,10 +97,10 @@ class Government:
     money_supply: float = 0.0  # 预留，当前版本不启用
     unemployment_benefit: float = 0.0
     outstanding_order_ids: Set[str] = field(default_factory=set)
-    strategy_label: str = "default"
+    labels: List[str] = field(default_factory=lambda: ["default"])
     _fulfillment_log: deque[Tuple[int, int, int]] = field(
         default_factory=lambda: deque(maxlen=30)
-    )  # (fulfilled, defaulted, tick) 按 Tick 聚合，maxlen=30 常数内存（未来功能预留）
+    )  # (fulfilled, defaulted, tick) 按 Tick 聚合，maxlen=30 常数内存
 
     def outstanding_orders(self, order_book: dict) -> list:
         return [
@@ -195,8 +206,7 @@ class WorldState:
     households: Dict[int, Household] = field(default_factory=dict)
     governments: Dict[int, Government] = field(default_factory=dict)
     goods: Dict[int, Good] = field(default_factory=dict)
-    supply_pool: List[Order] = field(default_factory=list)  # 卖方挂单，持久待分配
-    demand_pool: List[Order] = field(default_factory=list)  # 买方挂单，持久待分配
+    market: "MarketData" = field(default=None)  # __post_init__ 中初始化
     pending_orders: List[Order] = field(default_factory=list)  # 已分配、待交割
     all_orders: Dict[str, Order] = field(
         default_factory=dict
@@ -204,3 +214,20 @@ class WorldState:
     collateral_pool: Dict[str, float] = field(
         default_factory=dict
     )  # "{order_id}_seller"/"{order_id}_buyer" → 冻结金额
+
+    def __post_init__(self):
+        if self.market is None:
+            self.market = MarketData()
+
+
+def _get_trade_history():
+    from core.ledger import TradeHistory
+
+    return TradeHistory()
+
+
+@dataclass
+class MarketData:
+    supply: List[Order] = field(default_factory=list)
+    demand: List[Order] = field(default_factory=list)
+    history: "TradeHistory" = field(default_factory=_get_trade_history)

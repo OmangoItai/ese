@@ -32,7 +32,7 @@ class Reporter:
     def calc_engel(
         households: Dict[int, Household],
         goods: Dict[int, Good],
-        ledger: "Ledger",
+        ledger: "TradeHistory",
         n_ticks: int = 30,
     ) -> float:
         if not ledger.records:
@@ -72,7 +72,7 @@ class Reporter:
         return unemployed / len(households)
 
     @staticmethod
-    def snapshot(state: WorldState, ledger: "Ledger") -> Dict:
+    def snapshot(state: WorldState, ledger: "TradeHistory") -> Dict:
         return {
             "tick": state.tick,
             "gini": Reporter.calc_gini(state.households, state.goods),

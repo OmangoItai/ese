@@ -2,7 +2,7 @@ from collections import deque
 import pytest
 from core.clearing_house import ClearingHouse
 from core.entities import Firm, Household, Government, Good, Order, WorldState
-from core.ledger import Ledger
+from core.ledger import TradeHistory
 
 
 def _make_firm(id_: int, cash: float, **kwargs) -> Firm:
@@ -39,30 +39,30 @@ def _make_order(
 
 class TestFulfillmentRate:
     def test_all_fulfilled_returns_one(self):
-        ch = ClearingHouse(Ledger())
+        ch = ClearingHouse(TradeHistory())
         f = _make_firm(1, 1000.0)
         f._fulfillment_log = deque([(10, 0, 10)], maxlen=30)
         assert ch._fulfillment_rate(f) == 1.0
 
     def test_all_defaulted_returns_zero(self):
-        ch = ClearingHouse(Ledger())
+        ch = ClearingHouse(TradeHistory())
         f = _make_firm(1, 1000.0)
         f._fulfillment_log = deque([(0, 5, 10)], maxlen=30)
         assert ch._fulfillment_rate(f) == 0.0
 
     def test_empty_returns_one(self):
-        ch = ClearingHouse(Ledger())
+        ch = ClearingHouse(TradeHistory())
         f = _make_firm(1, 1000.0)
         assert ch._fulfillment_rate(f) == 1.0
 
     def test_all_zeros_returns_one(self):
-        ch = ClearingHouse(Ledger())
+        ch = ClearingHouse(TradeHistory())
         f = _make_firm(1, 1000.0)
         f._fulfillment_log = deque([(0, 0, 10)], maxlen=30)
         assert ch._fulfillment_rate(f) == 1.0
 
     def test_mixed_returns_ratio(self):
-        ch = ClearingHouse(Ledger())
+        ch = ClearingHouse(TradeHistory())
         f = _make_firm(1, 1000.0)
         f._fulfillment_log = deque(
             [
@@ -78,13 +78,13 @@ class TestFulfillmentRate:
         assert ch._fulfillment_rate(f) == expected
 
     def test_high_volume_in_single_tick(self):
-        ch = ClearingHouse(Ledger())
+        ch = ClearingHouse(TradeHistory())
         f = _make_firm(1, 1000.0)
         f._fulfillment_log = deque([(98, 2, 10)], maxlen=30)
         assert ch._fulfillment_rate(f) == 98.0 / 100.0
 
     def test_multiple_ticks_aggregate(self):
-        ch = ClearingHouse(Ledger())
+        ch = ClearingHouse(TradeHistory())
         f = _make_firm(1, 1000.0)
         f._fulfillment_log = deque(
             [
@@ -102,39 +102,39 @@ class TestFulfillmentRate:
 
 class TestDynamicCollateralRatio:
     def test_full_fulfillment_returns_base(self):
-        ch = ClearingHouse(Ledger(), base_collateral_ratio=0.1)
+        ch = ClearingHouse(TradeHistory(), base_collateral_ratio=0.1)
         f = _make_firm(1, 1000.0)
         f._fulfillment_log = deque([(10, 0, 10)], maxlen=30)
         assert ch.calc_dynamic_collateral_ratio(f) == 0.1
 
     def test_zero_fulfillment_returns_max(self):
-        ch = ClearingHouse(Ledger(), base_collateral_ratio=0.1)
+        ch = ClearingHouse(TradeHistory(), base_collateral_ratio=0.1)
         f = _make_firm(1, 1000.0)
         f._fulfillment_log = deque([(0, 5, 10)], maxlen=30)
         assert ch.calc_dynamic_collateral_ratio(f) == pytest.approx(0.5)
 
     def test_50pct_fulfillment(self):
-        ch = ClearingHouse(Ledger(), base_collateral_ratio=0.1)
+        ch = ClearingHouse(TradeHistory(), base_collateral_ratio=0.1)
         f = _make_firm(1, 1000.0)
         f._fulfillment_log = deque([(5, 5, 10)], maxlen=30)
         expected = 0.1 + (1.0 - 0.5) * 0.4
         assert ch.calc_dynamic_collateral_ratio(f) == expected
 
     def test_different_base_ratio(self):
-        ch = ClearingHouse(Ledger(), base_collateral_ratio=0.2)
+        ch = ClearingHouse(TradeHistory(), base_collateral_ratio=0.2)
         f = _make_firm(1, 1000.0)
         f._fulfillment_log = deque([(3, 0, 10)], maxlen=30)
         assert ch.calc_dynamic_collateral_ratio(f) == 0.2
 
     def test_empty_log_returns_base(self):
-        ch = ClearingHouse(Ledger(), base_collateral_ratio=0.1)
+        ch = ClearingHouse(TradeHistory(), base_collateral_ratio=0.1)
         f = _make_firm(1, 1000.0)
         assert ch.calc_dynamic_collateral_ratio(f) == 0.1
 
 
 class TestValidateOrder:
     def setup_method(self):
-        self.ledger = Ledger()
+        self.ledger = TradeHistory()
         self.ch = ClearingHouse(self.ledger, base_collateral_ratio=0.1)
 
     def _make_ws(self, firm=None, household=None, goods=None):
@@ -228,7 +228,7 @@ class TestValidateOrder:
 
 class TestFreezeRelease:
     def setup_method(self):
-        self.ledger = Ledger()
+        self.ledger = TradeHistory()
         self.ch = ClearingHouse(self.ledger, base_collateral_ratio=0.1)
 
     def _make_ws_with_two_firms(self, cash1=5000.0, cash2=5000.0):
@@ -294,7 +294,7 @@ class TestFreezeRelease:
 
 class TestForfeitCollateral:
     def setup_method(self):
-        self.ledger = Ledger()
+        self.ledger = TradeHistory()
         self.ch = ClearingHouse(self.ledger, base_collateral_ratio=0.1)
 
     def _make_ws(self):
@@ -344,7 +344,7 @@ class TestForfeitCollateral:
 
 class TestPriceTracking:
     def setup_method(self):
-        self.ledger = Ledger()
+        self.ledger = TradeHistory()
         self.ch = ClearingHouse(self.ledger, base_collateral_ratio=0.1)
 
     def test_record_and_get_price_range(self):
@@ -393,7 +393,7 @@ class TestPriceTracking:
 
 class TestRecordSettlement:
     def test_record_same_tick_merges_into_one_entry(self):
-        ch = ClearingHouse(Ledger())
+        ch = ClearingHouse(TradeHistory())
         f = _make_firm(1, 1000.0)
         ch.record_settlement(f, True, tick=5)
         ch.record_settlement(f, True, tick=5)
@@ -402,7 +402,7 @@ class TestRecordSettlement:
         assert f._fulfillment_log[0] == (2, 1, 5)
 
     def test_record_different_ticks_create_separate_entries(self):
-        ch = ClearingHouse(Ledger())
+        ch = ClearingHouse(TradeHistory())
         f = _make_firm(1, 1000.0)
         ch.record_settlement(f, True, tick=5)
         ch.record_settlement(f, False, tick=6)
@@ -413,7 +413,7 @@ class TestRecordSettlement:
     def test_deque_maxlen_evicts_oldest(self):
         f = _make_firm(1, 1000.0)
         f._fulfillment_log = deque(maxlen=3)
-        ch = ClearingHouse(Ledger())
+        ch = ClearingHouse(TradeHistory())
         ch.record_settlement(f, True, tick=5)
         ch.record_settlement(f, True, tick=6)
         ch.record_settlement(f, True, tick=7)
@@ -429,7 +429,7 @@ class TestRecordSettlement:
 
 class TestSettleOrderGoods:
     def setup_method(self):
-        self.ledger = Ledger()
+        self.ledger = TradeHistory()
         self.ch = ClearingHouse(self.ledger, base_collateral_ratio=0.1)
 
     def _make_ws(self, seller_cash=5000.0, buyer_cash=5000.0, goods=None):
@@ -454,7 +454,7 @@ class TestSettleOrderGoods:
             settlement_tick=5,
         )
         ws.all_orders["o1"] = order
-        ws.supply_pool.append(order)
+        ws.market.supply.append(order)
 
         seller_cash_original = ws.firms[1].cash
         buyer_cash_original = ws.firms[2].cash
@@ -490,7 +490,7 @@ class TestSettleOrderGoods:
             settlement_tick=5,
         )
         ws.all_orders["o1"] = order
-        ws.supply_pool.append(order)
+        ws.market.supply.append(order)
         self.ch.freeze_collateral(ws, order)
         ws.pending_orders.append(order)
 
@@ -519,7 +519,7 @@ class TestSettleOrderGoods:
             settlement_tick=5,
         )
         ws.all_orders["o1"] = order
-        ws.supply_pool.append(order)
+        ws.market.supply.append(order)
         self.ch.freeze_collateral(ws, order)
         ws.pending_orders.append(order)
 
@@ -573,7 +573,7 @@ class TestSettleOrderGoods:
             settlement_tick=5,
         )
         ws.all_orders["o1"] = order
-        ws.supply_pool.append(order)
+        ws.market.supply.append(order)
         self.ch.freeze_collateral(ws, order)
         ws.pending_orders.append(order)
 
@@ -599,7 +599,7 @@ class TestSettleOrderGoods:
             settlement_tick=5,
         )
         ws.all_orders["o1"] = order
-        ws.supply_pool.append(order)
+        ws.market.supply.append(order)
         self.ch.freeze_collateral(ws, order)
         ws.pending_orders.append(order)
 
@@ -613,7 +613,7 @@ class TestSettleOrderGoods:
 
 class TestSettleOrderLabor:
     def setup_method(self):
-        self.ledger = Ledger()
+        self.ledger = TradeHistory()
         self.ch = ClearingHouse(self.ledger, base_collateral_ratio=0.1)
 
     def _make_ws(self):
@@ -640,7 +640,7 @@ class TestSettleOrderLabor:
             settlement_tick=5,
         )
         ws.all_orders["o1"] = order
-        ws.supply_pool.append(order)
+        ws.market.supply.append(order)
         self.ch.freeze_collateral(ws, order)
         ws.pending_orders.append(order)
 
@@ -677,7 +677,7 @@ class TestSettleOrderLabor:
             settlement_tick=5,
         )
         ws.all_orders["o1"] = order
-        ws.supply_pool.append(order)
+        ws.market.supply.append(order)
         self.ch.freeze_collateral(ws, order)
         ws.pending_orders.append(order)
 
@@ -711,7 +711,7 @@ class TestSettleOrderLabor:
 
 class TestLiquidateFirm:
     def setup_method(self):
-        self.ledger = Ledger()
+        self.ledger = TradeHistory()
         self.ch = ClearingHouse(self.ledger, base_collateral_ratio=0.1)
 
     def test_liquidate_firm_foreclosure_and_dismiss(self):
@@ -770,7 +770,7 @@ class TestLiquidateFirm:
 
         order = _make_order("o1", 1, 2, 1, quantity=10.0, price=5.0, status="OPEN")
         ws.all_orders["o1"] = order
-        ws.supply_pool.append(order)
+        ws.market.supply.append(order)
         self.ch.freeze_collateral(ws, order)
 
         cpty_cash_after_freeze = counterparty.cash
@@ -778,7 +778,7 @@ class TestLiquidateFirm:
         self.ch.liquidate_firm(ws, 1)
 
         assert order.status == "CANCELLED"
-        assert order not in ws.supply_pool
+        assert order not in ws.market.supply
         assert counterparty.cash > cpty_cash_after_freeze
 
     def test_liquidate_firm_clears_allocated_orders(self):
@@ -853,7 +853,7 @@ class TestLiquidateFirm:
 
 class TestSettleAllExpired:
     def setup_method(self):
-        self.ledger = Ledger()
+        self.ledger = TradeHistory()
         self.ch = ClearingHouse(self.ledger, base_collateral_ratio=0.1)
 
     def test_settle_all_expired_processes_orders(self):
@@ -947,7 +947,7 @@ class TestSettleAllExpired:
 
 class TestExpireStaleOrders:
     def setup_method(self):
-        self.ledger = Ledger()
+        self.ledger = TradeHistory()
         self.ch = ClearingHouse(self.ledger, base_collateral_ratio=0.1)
 
     def test_expire_stale_orders_removes_expired(self):
@@ -968,16 +968,16 @@ class TestExpireStaleOrders:
 
         for o in [order_old, order_new]:
             ws.all_orders[o.order_id] = o
-            ws.supply_pool.append(o)
+            ws.market.supply.append(o)
             self.ch.freeze_collateral(ws, o)
 
         count = self.ch.expire_stale_orders(ws, expire_ticks=30)
 
         assert count == 1
         assert order_old.status == "EXPIRED"
-        assert order_old not in ws.supply_pool
+        assert order_old not in ws.market.supply
         assert order_new.status == "OPEN"
-        assert order_new in ws.supply_pool
+        assert order_new in ws.market.supply
 
     def test_expire_stale_orders_releases_collateral(self):
         good = _make_good(1, "bread", good_type="consumer")
@@ -993,7 +993,7 @@ class TestExpireStaleOrders:
         order = _make_order("o1", 1, 2, 1, quantity=10.0, price=5.0, status="OPEN")
         order.creation_tick = 5
         ws.all_orders["o1"] = order
-        ws.supply_pool.append(order)
+        ws.market.supply.append(order)
         self.ch.freeze_collateral(ws, order)
 
         seller_cash_after_freeze = seller.cash
@@ -1019,10 +1019,10 @@ class TestExpireStaleOrders:
         order = _make_order("o1", 1, 2, 1, quantity=10.0, price=5.0, status="OPEN")
         order.creation_tick = 5
         ws.all_orders["o1"] = order
-        ws.demand_pool.append(order)
+        ws.market.demand.append(order)
         self.ch.freeze_collateral(ws, order)
 
         count = self.ch.expire_stale_orders(ws, expire_ticks=30)
         assert count == 1
         assert order.status == "EXPIRED"
-        assert order not in ws.demand_pool
+        assert order not in ws.market.demand

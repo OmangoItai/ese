@@ -5,7 +5,6 @@ import yaml
 from core.clearing_house import ClearingHouse
 from core.data_layer import OrderFactory, Sequence, WorldLoader
 from core.entities import AgentOrders, Order, OrderSide, WorldState
-from core.ledger import Ledger
 from core.market_intelligence import MarketIntelligence, MarketIntelligenceBuilder
 from core.noise import InformationFriction
 from core.reporter import Reporter
@@ -14,22 +13,21 @@ from core.reporter import Reporter
 class Simulator:
     def __init__(self, config_path: str, world_db_path: str, strategy_registry=None):
         self.config = self._load_config(config_path)
-        self.ledger = Ledger()
         self.noise = InformationFriction(seed=self.config.get("seed", 42))
-        self.clearing = ClearingHouse(
-            ledger=self.ledger,
-            base_collateral_ratio=self.config.get("base_collateral_ratio", 0.1),
-            fulfillment_window_ticks=self.config.get("fulfillment_window_ticks", 30),
-        )
         self.reporter = Reporter()
         self._id_seq = Sequence()
         self.order_factory = OrderFactory(self._id_seq)
         self.state = WorldLoader.load(world_db_path)
+        self.clearing = ClearingHouse(
+            ledger=self.state.market.history,
+            base_collateral_ratio=self.config.get("base_collateral_ratio", 0.1),
+            fulfillment_window_ticks=self.config.get("fulfillment_window_ticks", 30),
+        )
         self.order_expire_ticks = self.config.get("order_expire_ticks", 30)
         self.mi_builder = MarketIntelligenceBuilder(
             self.noise, self.reporter, self.config
         )
-        self.mi = self.mi_builder.build(self.state, self.ledger)
+        self.mi = self.mi_builder.build(self.state, self.state.market.history)
         self._reg = strategy_registry
 
     @staticmethod
@@ -66,7 +64,7 @@ class Simulator:
         state.tick += 1
 
         # 9. 构建 MarketIntelligence（含噪声），缓存供下一 Tick 使用
-        self.mi = self.mi_builder.build(state, self.ledger)
+        self.mi = self.mi_builder.build(state, state.market.history)
 
         return state
 
@@ -74,7 +72,9 @@ class Simulator:
         snapshots = []
         for _ in range(n_ticks):
             self.tick()
-            snapshots.append(self.reporter.snapshot(self.state, self.ledger))
+            snapshots.append(
+                self.reporter.snapshot(self.state, self.state.market.history)
+            )
         return snapshots
 
     def _pay_wages(self, state: WorldState) -> None:
@@ -198,9 +198,9 @@ class Simulator:
         self.clearing.freeze_collateral(state, order)
 
         if order.side == OrderSide.SUPPLY:
-            state.supply_pool.append(order)
+            state.market.supply.append(order)
         elif order.side == OrderSide.DEMAND:
-            state.demand_pool.append(order)
+            state.market.demand.append(order)
 
     def _cancel_order(self, state: WorldState, order_id: str) -> None:
         order = state.all_orders.get(order_id)
@@ -209,12 +209,12 @@ class Simulator:
 
         self.clearing.release_collateral(state, order)
         order.status = "CANCELLED"
-        self.ledger.record_trade(order)
+        state.market.history.record_trade(order)
 
-        if order in state.supply_pool:
-            state.supply_pool.remove(order)
-        if order in state.demand_pool:
-            state.demand_pool.remove(order)
+        if order in state.market.supply:
+            state.market.supply.remove(order)
+        if order in state.market.demand:
+            state.market.demand.remove(order)
 
     def _execute_allocation(self, mi: MarketIntelligence, state: WorldState) -> None:
         allocate_fn = self._reg.get("allocation") if self._reg else None
@@ -225,14 +225,14 @@ class Simulator:
 
         matched, remaining_supply, remaining_demand = allocate_fn(
             mi,
-            list(state.supply_pool),
-            list(state.demand_pool),
+            list(state.market.supply),
+            list(state.market.demand),
             state.goods,
             pricing_fn,
         )
 
-        state.supply_pool = remaining_supply
-        state.demand_pool = remaining_demand
+        state.market.supply = remaining_supply
+        state.market.demand = remaining_demand
 
         for order in matched:
             order.status = "ALLOCATED"
@@ -241,7 +241,7 @@ class Simulator:
             order.settlement_tick = state.tick + lag
             state.all_orders[order.order_id] = order
             state.pending_orders.append(order)
-            self.ledger.record_trade(order)
+            state.market.history.record_trade(order)
 
     def _end_tick_for_all(self, state: WorldState) -> None:
         for hh in state.households.values():

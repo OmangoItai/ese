@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List
 
 from core.entities import Order, WorldState
-from core.ledger import Ledger
+from core.ledger import TradeHistory
 from core.noise import InformationFriction
 from core.reporter import Reporter
 
@@ -28,20 +28,20 @@ class MarketIntelligenceBuilder:
         self.reporter = reporter
         self.config = config
 
-    def build(self, state: WorldState, ledger: Ledger) -> MarketIntelligence:
+    def build(self, state: WorldState, ledger: TradeHistory) -> MarketIntelligence:
         raw = self._collect_raw(state, ledger)
         noised = self._apply_noise(raw)
         return MarketIntelligence(**noised)
 
-    def _collect_raw(self, state: WorldState, ledger: Ledger) -> dict:
+    def _collect_raw(self, state: WorldState, ledger: TradeHistory) -> dict:
         return {
             "tick": state.tick,
             "gini": self.reporter.calc_gini(state.households, state.goods),
             "unemployment_rate": self.reporter.calc_unemployment(state.households),
             "engel": self.reporter.calc_engel(state.households, state.goods, ledger),
-            "sector_avg_price": self._aggregate_pool(state.supply_pool, agg="avg"),
-            "sector_total_supply": self._aggregate_pool(state.supply_pool, agg="sum"),
-            "sector_total_demand": self._aggregate_pool(state.demand_pool, agg="sum"),
+            "sector_avg_price": self._aggregate_pool(state.market.supply, agg="avg"),
+            "sector_total_supply": self._aggregate_pool(state.market.supply, agg="sum"),
+            "sector_total_demand": self._aggregate_pool(state.market.demand, agg="sum"),
             "tax_rate": self._get_gov_attr(state, "tax_rate"),
             "unemployment_benefit": self._get_gov_attr(state, "unemployment_benefit"),
             "active_firms": sum(1 for f in state.firms.values() if f.is_active),

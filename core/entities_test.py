@@ -185,8 +185,8 @@ class TestWorldState:
         assert ws.households == {}
         assert ws.governments == {}
         assert ws.goods == {}
-        assert ws.supply_pool == []
-        assert ws.demand_pool == []
+        assert ws.market.supply == []
+        assert ws.market.demand == []
         assert ws.pending_orders == []
         assert ws.all_orders == {}
         assert ws.collateral_pool == {}

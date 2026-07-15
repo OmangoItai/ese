@@ -1,6 +1,6 @@
 import sqlite3
 import threading
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 from core.entities import (
     Firm,
@@ -84,7 +84,7 @@ class WorldLoader:
 
             firms: Dict[int, Firm] = {}
             c.execute(
-                "SELECT id, cash, capacity, collateral, is_active, strategy_label FROM firms"
+                "SELECT id, cash, capacity, collateral, is_active, labels FROM firms"
             )
             cols = [d[0] for d in c.description]
             for row in c.fetchall():
@@ -97,8 +97,8 @@ class WorldLoader:
                     "collateral": float(row_dict["collateral"]),
                     "is_active": bool(row_dict["is_active"]),
                 }
-                if "strategy_label" in cols:
-                    kwargs["strategy_label"] = row_dict["strategy_label"]
+                if "labels" in cols:
+                    kwargs["labels"] = row_dict["labels"].split(",")
                 firms[fid] = Firm(**kwargs)
 
             c.execute("SELECT firm_id, good_id, quantity FROM firm_inventory")
@@ -116,7 +116,7 @@ class WorldLoader:
             households: Dict[int, Household] = {}
             c.execute(
                 "SELECT id, cash, labor_ask_price, is_employed, "
-                "employer_firm_id, unemployment_ticks, strategy_label FROM households"
+                "employer_firm_id, unemployment_ticks, labels FROM households"
             )
             cols = [d[0] for d in c.description]
             for row in c.fetchall():
@@ -130,8 +130,8 @@ class WorldLoader:
                     "employer_firm_id": row_dict["employer_firm_id"],
                     "unemployment_ticks": row_dict["unemployment_ticks"],
                 }
-                if "strategy_label" in cols:
-                    kwargs["strategy_label"] = row_dict["strategy_label"]
+                if "labels" in cols:
+                    kwargs["labels"] = row_dict["labels"].split(",")
                 households[hid] = Household(**kwargs)
 
             c.execute("SELECT household_id, good_id, quantity FROM household_inventory")
@@ -142,7 +142,7 @@ class WorldLoader:
 
             governments: Dict[int, Government] = {}
             c.execute(
-                "SELECT id, cash, tax_rate, money_supply, unemployment_benefit, strategy_label "
+                "SELECT id, cash, tax_rate, money_supply, unemployment_benefit, labels "
                 "FROM governments"
             )
             cols = [d[0] for d in c.description]
@@ -156,8 +156,8 @@ class WorldLoader:
                     "money_supply": float(row_dict["money_supply"]),
                     "unemployment_benefit": float(row_dict["unemployment_benefit"]),
                 }
-                if "strategy_label" in cols:
-                    kwargs["strategy_label"] = row_dict["strategy_label"]
+                if "labels" in cols:
+                    kwargs["labels"] = row_dict["labels"].split(",")
                 governments[gid] = Government(**kwargs)
 
             if len(governments) != 1:
@@ -182,8 +182,6 @@ class WorldLoader:
                 households=households,
                 governments=governments,
                 goods=goods,
-                supply_pool=[],
-                demand_pool=[],
                 pending_orders=[],
                 all_orders={},
                 collateral_pool={},
@@ -219,15 +217,17 @@ class WorldBuilder:
         cash: float,
         *,
         capacity: float = 0,
-        strategy_label: str = "default",
+        labels: Optional[List[str]] = None,
         inventory: Optional[Dict[int, float]] = None,
         employees: Optional[list[int]] = None,
     ) -> "WorldBuilder":
+        if labels is None:
+            labels = ["default"]
         firm = Firm(
             id=id,
             cash=cash,
             capacity=capacity,
-            strategy_label=strategy_label,
+            labels=labels,
         )
         if inventory:
             for good_id, qty in inventory.items():
@@ -249,15 +249,17 @@ class WorldBuilder:
         is_employed: bool = False,
         employer_firm_id: Optional[int] = None,
         inventory: Optional[Dict[int, float]] = None,
-        strategy_label: str = "default",
+        labels: Optional[List[str]] = None,
     ) -> "WorldBuilder":
+        if labels is None:
+            labels = ["default"]
         hh = Household(
             id=id,
             cash=cash,
             labor_ask_price=labor_ask_price,
             is_employed=is_employed,
             employer_firm_id=employer_firm_id,
-            strategy_label=strategy_label,
+            labels=labels,
         )
         if inventory:
             for good_id, qty in inventory.items():
@@ -273,14 +275,16 @@ class WorldBuilder:
         *,
         tax_rate: float = 0,
         unemployment_benefit: float = 0,
-        strategy_label: str = "default",
+        labels: Optional[List[str]] = None,
     ) -> "WorldBuilder":
+        if labels is None:
+            labels = ["default"]
         self._governments[id] = Government(
             id=id,
             cash=cash,
             tax_rate=tax_rate,
             unemployment_benefit=unemployment_benefit,
-            strategy_label=strategy_label,
+            labels=labels,
         )
         return self
 
@@ -323,7 +327,7 @@ class WorldBuilder:
                     capacity REAL NOT NULL DEFAULT 0.0,
                     collateral REAL NOT NULL DEFAULT 0.0,
                     is_active INTEGER NOT NULL DEFAULT 1,
-                    strategy_label TEXT NOT NULL DEFAULT 'default')"""
+                    labels TEXT NOT NULL DEFAULT 'default')"""
             )
             c.execute(
                 """CREATE TABLE firm_inventory (
@@ -346,7 +350,7 @@ class WorldBuilder:
                     is_employed INTEGER NOT NULL DEFAULT 0,
                     employer_firm_id INTEGER,
                     unemployment_ticks INTEGER NOT NULL DEFAULT 0,
-                    strategy_label TEXT NOT NULL DEFAULT 'default')"""
+                    labels TEXT NOT NULL DEFAULT 'default')"""
             )
             c.execute(
                 """CREATE TABLE household_inventory (
@@ -362,7 +366,7 @@ class WorldBuilder:
                     tax_rate REAL NOT NULL DEFAULT 0.0,
                     money_supply REAL NOT NULL DEFAULT 0.0,
                     unemployment_benefit REAL NOT NULL DEFAULT 0.0,
-                    strategy_label TEXT NOT NULL DEFAULT 'default')"""
+                    labels TEXT NOT NULL DEFAULT 'default')"""
             )
 
             for g in self._goods.values():
@@ -373,14 +377,14 @@ class WorldBuilder:
 
             for f in self._firms.values():
                 c.execute(
-                    "INSERT INTO firms (id, cash, capacity, collateral, is_active, strategy_label) VALUES (?,?,?,?,?,?)",
+                    "INSERT INTO firms (id, cash, capacity, collateral, is_active, labels) VALUES (?,?,?,?,?,?)",
                     (
                         f.id,
                         f.cash,
                         f.capacity,
                         f.collateral,
                         int(f.is_active),
-                        f.strategy_label,
+                        ",".join(f.labels),
                     ),
                 )
                 for inv in self._firm_inventory:
@@ -393,7 +397,7 @@ class WorldBuilder:
             for hh in self._households.values():
                 c.execute(
                     "INSERT INTO households (id, cash, labor_ask_price, is_employed, "
-                    "employer_firm_id, unemployment_ticks, strategy_label) VALUES (?,?,?,?,?,?,?)",
+                    "employer_firm_id, unemployment_ticks, labels) VALUES (?,?,?,?,?,?,?)",
                     (
                         hh.id,
                         hh.cash,
@@ -401,7 +405,7 @@ class WorldBuilder:
                         int(hh.is_employed),
                         hh.employer_firm_id,
                         hh.unemployment_ticks,
-                        hh.strategy_label,
+                        ",".join(hh.labels),
                     ),
                 )
                 for inv in self._household_inventory:
@@ -411,14 +415,14 @@ class WorldBuilder:
             for gov in self._governments.values():
                 c.execute(
                     "INSERT INTO governments (id, cash, tax_rate, money_supply, "
-                    "unemployment_benefit, strategy_label) VALUES (?,?,?,?,?,?)",
+                    "unemployment_benefit, labels) VALUES (?,?,?,?,?,?)",
                     (
                         gov.id,
                         gov.cash,
                         gov.tax_rate,
                         gov.money_supply,
                         gov.unemployment_benefit,
-                        gov.strategy_label,
+                        ",".join(gov.labels),
                     ),
                 )
 
