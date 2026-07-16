@@ -16,6 +16,7 @@ from core.engine import _AllocationSlot, _Slot
 class _MockSimulator:
     def __init__(self, state: WorldState):
         self.state = state
+        self.mi = None
         self.order_factory = OrderFactory(Sequence())
 
     def _dispatch_agent_result(self, state, result):
@@ -63,7 +64,7 @@ class TestAllocationSlotPricing:
         slot = _AllocationSlot(reg, lambda: None, sim)
 
         @slot.pricing
-        def mid_price(s, d, cfg):
+        def mid_price(s, d, cfg, market):
             return (s.price + d.price) / 2.0
 
         assert reg.get_pricing() is mid_price
@@ -81,7 +82,7 @@ class TestSlotApply:
 
         called = []
 
-        def leaf_fn(entity, orders):
+        def leaf_fn(entity, orders, mi, market):
             called.append(entity.id)
 
         results = slot.apply("farm", leaf_fn)
@@ -101,7 +102,7 @@ class TestSlotApply:
 
         called = []
 
-        def leaf_fn(entity, orders):
+        def leaf_fn(entity, orders, mi, market):
             called.append(entity.id)
 
         slot.apply("nonexistent", leaf_fn)
@@ -119,7 +120,7 @@ class TestSlotApply:
 
         called = []
 
-        def leaf_fn(entity, orders):
+        def leaf_fn(entity, orders, mi, market):
             called.append(entity.id)
 
         results = slot.apply("farm", leaf_fn)
@@ -140,7 +141,7 @@ class TestSlotApply:
 
         called = []
 
-        def leaf_fn(entity, orders):
+        def leaf_fn(entity, orders, mi, market):
             called.append(entity.id)
 
         results = slot.apply("farm", leaf_fn)
@@ -156,7 +157,7 @@ class TestSlotApply:
         sim = _make_mock_sim(firms=firms)
         slot = _Slot(reg, "firm", lambda: list(sim.state.firms.values()), sim)
 
-        def leaf_fn(entity, orders):
+        def leaf_fn(entity, orders, mi, market):
             return {"capacity": entity.cash}
 
         results = slot.apply("farm", leaf_fn)
@@ -174,7 +175,7 @@ class TestSlotApply:
 
         received_params = {}
 
-        def leaf_fn(entity, orders, **kwargs):
+        def leaf_fn(entity, orders, mi, market, **kwargs):
             received_params.update(kwargs)
 
         slot.apply("farm", leaf_fn, target=500.0, quota={"output": 10})
@@ -192,7 +193,7 @@ class TestSlotApply:
 
         called = []
 
-        def leaf_fn(entity, orders):
+        def leaf_fn(entity, orders, mi, market):
             called.append(entity.id)
 
         results = slot.apply("worker", leaf_fn)
@@ -212,7 +213,7 @@ class TestSlotApply:
 
         called = []
 
-        def leaf_fn(entity, orders):
+        def leaf_fn(entity, orders, mi, market):
             called.append(entity.id)
 
         results = slot.apply("default", leaf_fn)

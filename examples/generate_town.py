@@ -33,7 +33,7 @@ if os.path.exists(DB_PATH):
     .add_household(
         1,
         60.0,
-        labor_ask_price=6.0,
+        reservation_wage=6.0,
         is_employed=True,
         employer_firm_id=101,
         inventory={1: 2.5},
@@ -41,7 +41,7 @@ if os.path.exists(DB_PATH):
     .add_household(
         2,
         70.0,
-        labor_ask_price=7.0,
+        reservation_wage=7.0,
         is_employed=True,
         employer_firm_id=101,
         inventory={1: 3.0},
@@ -49,7 +49,7 @@ if os.path.exists(DB_PATH):
     .add_household(
         3,
         80.0,
-        labor_ask_price=8.0,
+        reservation_wage=8.0,
         is_employed=True,
         employer_firm_id=101,
         inventory={1: 3.5},
@@ -57,7 +57,7 @@ if os.path.exists(DB_PATH):
     .add_household(
         4,
         90.0,
-        labor_ask_price=9.0,
+        reservation_wage=9.0,
         is_employed=True,
         employer_firm_id=102,
         inventory={1: 4.0},
@@ -65,16 +65,16 @@ if os.path.exists(DB_PATH):
     .add_household(
         5,
         100.0,
-        labor_ask_price=10.0,
+        reservation_wage=10.0,
         is_employed=True,
         employer_firm_id=102,
         inventory={1: 4.5},
     )
-    .add_household(6, 110.0, labor_ask_price=11.0, inventory={1: 5.0})
-    .add_household(7, 120.0, labor_ask_price=12.0, inventory={1: 5.5})
-    .add_household(8, 130.0, labor_ask_price=13.0, inventory={1: 6.0})
-    .add_household(9, 140.0, labor_ask_price=14.0, inventory={1: 6.5})
-    .add_household(10, 150.0, labor_ask_price=15.0, inventory={1: 7.0})
+    .add_household(6, 110.0, reservation_wage=11.0, inventory={1: 5.0})
+    .add_household(7, 120.0, reservation_wage=12.0, inventory={1: 5.5})
+    .add_household(8, 130.0, reservation_wage=13.0, inventory={1: 6.0})
+    .add_household(9, 140.0, reservation_wage=14.0, inventory={1: 6.5})
+    .add_household(10, 150.0, reservation_wage=15.0, inventory={1: 7.0})
     .add_government(201, 2000.0, tax_rate=0.1, unemployment_benefit=2.0)
     .save(DB_PATH)
 )

@@ -168,13 +168,11 @@ def planning_state(mi, goods):
 ```python
 @ese.firm
 def mixed(mi, goods):
-    # 基线：市场
-    ese.firm.apply("farm", farm_decide)
-    ese.firm.apply("factory", factory_decide)
-
-    # 恩格尔过高 → 对农业加约束
     if mi.engel > 阈值:
         ese.firm.apply("farm", farm_decide, ceiling=上限)
+    else:
+        ese.firm.apply("farm", farm_decide)
+    ese.firm.apply("factory", factory_decide)
 
     # 失业率过高 → 摸底工业产能 → 国家投资扩产
     if mi.unemployment > 阈值:
@@ -214,8 +212,8 @@ def steel_survey(firm, orders, targets):
 
 def steel_execute(firm, orders, quota):
     for good_id, qty in calc_inputs(quota).items():
-        orders.new(side=DEMAND, good_id=good_id, quantity=qty, price=...)
-    orders.new(side=SUPPLY, good_id=STEEL_ID, quantity=quota["output"], price=...)
+        orders.new(good_id=good_id, quantity=qty, price=..., side=DEMAND)
+    orders.new(good_id=STEEL_ID, quantity=quota["output"], price=..., side=SUPPLY)
 ```
 
 - 叶子函数可直接访问 Firm 实例的真实属性。
@@ -227,7 +225,7 @@ def steel_execute(firm, orders, quota):
 ```python
 def worker_spend(hh, orders):
     budget = hh.cash * 0.3
-    orders.new(side=DEMAND, good_id=FOOD_ID, quantity=budget / food_price, price=...)
+    orders.new(good_id=FOOD_ID, quantity=budget / food_price, price=..., side=DEMAND)
 ```
 
 ### Government 宏函数

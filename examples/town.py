@@ -26,19 +26,17 @@ ese = Engine(
 # ============================================================
 
 
-def farm_decide(firm, orders):
+def farm_decide(firm, orders, mi, market):
     """农场：消耗工具 → 产出食物 → 卖食物、买工具"""
-    tool_inv = firm.inventory.get(2, 0.0)
+    tool_inv = firm.inventory[2]
     if tool_inv >= 1.0:
         firm.inventory[2] = tool_inv - 1.0
-        firm.inventory[1] = firm.inventory.get(1, 0.0) + 5.0
+        firm.inventory[1] = firm.inventory[1] + 5.0
 
-    food_qty = firm.inventory.get(1, 0.0)
+    food_qty = firm.inventory[1]
     if food_qty > 2.0:
         sell_qty = min(food_qty - 2.0, 10.0)
         orders.new(
-            seller_id=firm.id,
-            buyer_id=0,
             good_id=1,
             quantity=sell_qty,
             price=2.0,
@@ -46,10 +44,8 @@ def farm_decide(firm, orders):
             description="农场卖食物",
         )
 
-    if firm.cash > 50.0 and firm.inventory.get(2, 0.0) < 10.0:
+    if firm.cash > 50.0 and firm.inventory[2] < 10.0:
         orders.new(
-            seller_id=0,
-            buyer_id=firm.id,
             good_id=2,
             quantity=2.0,
             price=3.0,
@@ -58,19 +54,17 @@ def farm_decide(firm, orders):
         )
 
 
-def workshop_decide(firm, orders):
+def workshop_decide(firm, orders, mi, market):
     """工坊：消耗食物 → 产出工具 → 卖工具、买食物"""
-    food_inv = firm.inventory.get(1, 0.0)
+    food_inv = firm.inventory[1]
     if food_inv >= 2.0:
         firm.inventory[1] = food_inv - 2.0
-        firm.inventory[2] = firm.inventory.get(2, 0.0) + 3.0
+        firm.inventory[2] = firm.inventory[2] + 3.0
 
-    tool_qty = firm.inventory.get(2, 0.0)
+    tool_qty = firm.inventory[2]
     if tool_qty > 2.0:
         sell_qty = min(tool_qty - 2.0, 5.0)
         orders.new(
-            seller_id=firm.id,
-            buyer_id=0,
             good_id=2,
             quantity=sell_qty,
             price=3.0,
@@ -78,10 +72,8 @@ def workshop_decide(firm, orders):
             description="工坊卖工具",
         )
 
-    if firm.cash > 50.0 and firm.inventory.get(1, 0.0) < 10.0:
+    if firm.cash > 50.0 and firm.inventory[1] < 10.0:
         orders.new(
-            seller_id=0,
-            buyer_id=firm.id,
             good_id=1,
             quantity=3.0,
             price=2.0,
@@ -90,7 +82,7 @@ def workshop_decide(firm, orders):
         )
 
 
-def household_spend(hh, orders):
+def household_spend(hh, orders, mi, market):
     """家庭消费：每 tick 拿 20% 现金买东西，70% 买食物、30% 买工具"""
     budget = hh.cash * 0.2
     if budget < 0.5:
@@ -101,8 +93,6 @@ def household_spend(hh, orders):
         qty = food_budget / 2.0
         if qty > 0.1:
             orders.new(
-                seller_id=0,
-                buyer_id=hh.id,
                 good_id=1,
                 quantity=qty,
                 price=2.0,
@@ -115,8 +105,6 @@ def household_spend(hh, orders):
         qty = tool_budget / 3.0
         if qty > 0.1:
             orders.new(
-                seller_id=0,
-                buyer_id=hh.id,
                 good_id=2,
                 quantity=qty,
                 price=3.0,
@@ -131,20 +119,20 @@ def household_spend(hh, orders):
 
 
 @ese.firm
-def firm_macro(mi: MarketIntelligence, goods: Dict[int, Good]):
+def firm_macro(mi: MarketIntelligence, goods: Dict[int, Good], market):
     """企业宏函数：按 labels 分发到叶子函数"""
     ese.firm.apply("farm", farm_decide)
     ese.firm.apply("workshop", workshop_decide)
 
 
 @ese.household
-def household_macro(mi: MarketIntelligence, goods: Dict[int, Good]):
+def household_macro(mi: MarketIntelligence, goods: Dict[int, Good], market):
     """家庭宏函数：所有家庭走同一个消费逻辑"""
     ese.household.apply("default", household_spend)
 
 
 @ese.government
-def government_macro(mi: MarketIntelligence, goods: Dict[int, Good]):
+def government_macro(mi: MarketIntelligence, goods: Dict[int, Good], market):
     """政府宏函数：税率和失业金在种子数据库中已设定，这里不做额外操作"""
     pass
 
@@ -160,6 +148,7 @@ def town_allocation(
     supply: List[Order],
     demand: List[Order],
     goods: Dict[int, Good],
+    market,
     pricing=None,
 ) -> Tuple[List[Order], List[Order], List[Order]]:
     """价格优先匹配：卖价低者优先，买价高者优先，同商品配对"""
@@ -188,7 +177,7 @@ def town_allocation(
                 continue
 
             qty = min(s.quantity, d.quantity)
-            price = pricing(s, d, {}) if pricing else (s.price + d.price) / 2.0
+            price = pricing(s, d, {}, market) if pricing else (s.price + d.price) / 2.0
             matched_order = Order(
                 order_id=f"town_match_{s.good_id}_{s.seller_id}_{d.buyer_id}_{mi.tick}_{len(matched)}",
                 seller_id=s.seller_id,
@@ -220,7 +209,7 @@ def town_allocation(
 
 
 @ese.allocation.pricing
-def mid_pricing(supply: Order, demand: Order, config: dict) -> float:
+def mid_pricing(supply: Order, demand: Order, config: dict, market) -> float:
     """取买卖双方报价的中间价"""
     return (supply.price + demand.price) / 2.0
 

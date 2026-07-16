@@ -1,6 +1,6 @@
+from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set, Tuple
-from collections import deque
 from enum import StrEnum
 
 __all__ = [
@@ -47,7 +47,9 @@ class Order:
 class Firm:
     id: int
     cash: float
-    inventory: Dict[int, float] = field(default_factory=dict)  # good_id -> quantity
+    inventory: Dict[int, float] = field(
+        default_factory=lambda: defaultdict(float)
+    )  # good_id -> quantity
     capacity: float = 0.0
     collateral: float = 0.0  # 自有资产净值（冻结金在 WorldState.collateral_pool）
     is_active: bool = True
@@ -70,8 +72,8 @@ class Firm:
 class Household:
     id: int
     cash: float
-    inventory: Dict[int, float] = field(default_factory=dict)
-    labor_ask_price: float = 0.0  # 期望工资
+    inventory: Dict[int, float] = field(default_factory=lambda: defaultdict(float))
+    reservation_wage: float = 0.0  # 期望工资
     is_employed: bool = False
     employer_firm_id: Optional[int] = None
     unemployment_ticks: int = 0
@@ -115,12 +117,13 @@ class AgentOrders:
     方法调用只记录意图，引擎策略执行后统一处理。
     """
 
-    def __init__(self, orders: list, order_factory=None):
+    def __init__(self, orders: list, order_factory=None, *, entity_id: int = 0):
         self._orders = orders
         self._new: list[dict] = []
         self._cancel: list[str] = []
         self._update: list[dict] = []
         self._factory = order_factory
+        self._entity_id = entity_id
 
     def __iter__(self):
         return iter(self._orders)
@@ -134,8 +137,6 @@ class AgentOrders:
     def new(
         self,
         *,
-        seller_id: int,
-        buyer_id: int,
         good_id: int,
         quantity: float,
         price: float,
@@ -144,6 +145,8 @@ class AgentOrders:
     ) -> None:
         if side is None:
             side = OrderSide.SUPPLY
+        seller_id = self._entity_id if side == OrderSide.SUPPLY else 0
+        buyer_id = self._entity_id if side == OrderSide.DEMAND else 0
         self._new.append(
             {
                 "seller_id": seller_id,
@@ -163,8 +166,6 @@ class AgentOrders:
         self,
         order_id: str,
         *,
-        seller_id: int,
-        buyer_id: int,
         good_id: int,
         quantity: float,
         price: float,
@@ -173,6 +174,8 @@ class AgentOrders:
     ) -> None:
         if side is None:
             side = OrderSide.SUPPLY
+        seller_id = self._entity_id if side == OrderSide.SUPPLY else 0
+        buyer_id = self._entity_id if side == OrderSide.DEMAND else 0
         self._update.append(
             {
                 "order_id": order_id,

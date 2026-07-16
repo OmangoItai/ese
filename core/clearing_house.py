@@ -241,14 +241,14 @@ class ClearingHouse:
         if seller is None or buyer is None:
             return False, "Party not found", False
 
-        seller_inventory = seller.inventory.get(order.good_id, 0.0)
+        seller_inventory = seller.inventory[order.good_id]
         buyer_cash_sufficient = buyer.cash >= order.price * order.quantity
         seller_inventory_sufficient = seller_inventory >= order.quantity
 
         if seller_inventory_sufficient and buyer_cash_sufficient:
             seller.inventory[order.good_id] = seller_inventory - order.quantity
             buyer.inventory[order.good_id] = (
-                buyer.inventory.get(order.good_id, 0.0) + order.quantity
+                buyer.inventory[order.good_id] + order.quantity
             )
             buyer.cash -= order.price * order.quantity
             seller.cash += order.price * order.quantity
@@ -500,7 +500,7 @@ class ClearingHouse:
             hh = state.households.get(emp_id)
             if hh is None:
                 continue
-            wage = hh.labor_ask_price
+            wage = hh.reservation_wage
             if firm.cash >= wage:
                 firm.cash -= wage
                 hh.cash += wage

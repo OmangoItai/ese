@@ -61,7 +61,7 @@ def _make_temp_db(rows_dict: dict) -> str:
     c.execute(
         """CREATE TABLE households (
             id INTEGER PRIMARY KEY, cash REAL NOT NULL,
-            labor_ask_price REAL NOT NULL DEFAULT 0.0,
+            reservation_wage REAL NOT NULL DEFAULT 0.0,
             is_employed INTEGER NOT NULL DEFAULT 0,
             employer_firm_id INTEGER,
             unemployment_ticks INTEGER NOT NULL DEFAULT 0,
@@ -96,7 +96,7 @@ def _make_temp_db(rows_dict: dict) -> str:
             c.executemany("INSERT INTO firm_employees VALUES (?,?)", rows)
         elif table == "households":
             c.executemany(
-                "INSERT INTO households (id, cash, labor_ask_price, is_employed, employer_firm_id, unemployment_ticks) VALUES (?,?,?,?,?,?)",
+                "INSERT INTO households (id, cash, reservation_wage, is_employed, employer_firm_id, unemployment_ticks) VALUES (?,?,?,?,?,?)",
                 rows,
             )
         elif table == "household_inventory":
@@ -178,13 +178,13 @@ def _make_mini_world_db() -> str:
 
 
 def _as_macro(sim, get_entities_fn, per_entity_fn):
-    def macro(mi, goods):
+    def macro(mi, goods, market):
         state = sim.state
         for entity in get_entities_fn():
             if hasattr(entity, "is_active") and not entity.is_active:
                 continue
             my_orders = entity.outstanding_orders(state.all_orders)
-            orders = AgentOrders(my_orders, sim.order_factory)
+            orders = AgentOrders(my_orders, sim.order_factory, entity_id=entity.id)
             per_entity_fn(mi, entity, goods, orders)
             sim._dispatch_agent_result(state, orders._consume())
 
@@ -203,8 +203,8 @@ class TestLoadWorld:
             assert len(ws.goods) == 3
 
             assert ws.firms[1].cash == 5000.0
-            assert ws.firms[1].inventory.get(1) == 50.0
-            assert ws.firms[1].inventory.get(3) == 10.0
+            assert ws.firms[1].inventory[1] == 50.0
+            assert ws.firms[1].inventory[3] == 10.0
             assert ws.firms[1].is_active is True
             assert ws.firms[1].employees == [101, 104]
 
@@ -212,10 +212,10 @@ class TestLoadWorld:
             assert ws.firms[2].employees == [102]
 
             assert ws.households[101].cash == 200.0
-            assert ws.households[101].labor_ask_price == 10.0
+            assert ws.households[101].reservation_wage == 10.0
             assert ws.households[101].is_employed is True
             assert ws.households[101].employer_firm_id == 1
-            assert ws.households[101].inventory.get(1) == 20.0
+            assert ws.households[101].inventory[1] == 20.0
 
             assert ws.households[105].is_employed is False
             assert ws.households[105].unemployment_ticks == 2
@@ -857,26 +857,22 @@ def _make_one_firm_one_hh_db() -> str:
 def _firm_strategy_for_test(mi, firm, goods, orders):
     """兼容测试用：firm 101+102 的合并策略，使用 orders.new() 风格"""
     if firm.id == 101:
-        tool_inv = firm.inventory.get(2, 0.0)
+        tool_inv = firm.inventory[2]
         if tool_inv >= 1.0:
             firm.inventory[2] = tool_inv - 1.0
-            firm.inventory[1] = firm.inventory.get(1, 0.0) + 5.0
-        food_qty = firm.inventory.get(1, 0.0)
+            firm.inventory[1] = firm.inventory[1] + 5.0
+        food_qty = firm.inventory[1]
         if food_qty > 2.0:
             sell_qty = min(food_qty - 2.0, 10.0)
             orders.new(
-                seller_id=firm.id,
-                buyer_id=0,
                 good_id=1,
                 quantity=sell_qty,
                 price=2.0,
                 side=OrderSide.SUPPLY,
                 description="B2C",
             )
-        if firm.cash > 50.0 and firm.inventory.get(2, 0.0) < 10.0:
+        if firm.cash > 50.0 and firm.inventory[2] < 10.0:
             orders.new(
-                seller_id=0,
-                buyer_id=firm.id,
                 good_id=2,
                 quantity=2.0,
                 price=3.0,
@@ -884,26 +880,22 @@ def _firm_strategy_for_test(mi, firm, goods, orders):
                 description="B2B",
             )
     elif firm.id == 102:
-        food_inv = firm.inventory.get(1, 0.0)
+        food_inv = firm.inventory[1]
         if food_inv >= 2.0:
             firm.inventory[1] = food_inv - 2.0
-            firm.inventory[2] = firm.inventory.get(2, 0.0) + 3.0
-        tool_qty = firm.inventory.get(2, 0.0)
+            firm.inventory[2] = firm.inventory[2] + 3.0
+        tool_qty = firm.inventory[2]
         if tool_qty > 2.0:
             sell_qty = min(tool_qty - 2.0, 5.0)
             orders.new(
-                seller_id=firm.id,
-                buyer_id=0,
                 good_id=2,
                 quantity=sell_qty,
                 price=3.0,
                 side=OrderSide.SUPPLY,
                 description="B2B",
             )
-        if firm.cash > 50.0 and firm.inventory.get(1, 0.0) < 10.0:
+        if firm.cash > 50.0 and firm.inventory[1] < 10.0:
             orders.new(
-                seller_id=0,
-                buyer_id=firm.id,
                 good_id=1,
                 quantity=3.0,
                 price=2.0,
@@ -921,8 +913,6 @@ def _household_strategy_for_test(mi, hh, goods, orders):
         qty = food_budget / 2.0
         if qty > 0.1:
             orders.new(
-                seller_id=0,
-                buyer_id=hh.id,
                 good_id=1,
                 quantity=qty,
                 price=2.0,
@@ -934,8 +924,6 @@ def _household_strategy_for_test(mi, hh, goods, orders):
         qty = tool_budget / 3.0
         if qty > 0.1:
             orders.new(
-                seller_id=0,
-                buyer_id=hh.id,
                 good_id=2,
                 quantity=qty,
                 price=3.0,
@@ -944,7 +932,7 @@ def _household_strategy_for_test(mi, hh, goods, orders):
             )
 
 
-def _allocation_for_test(mi, supply, demand, goods, pricing=None):
+def _allocation_for_test(mi, supply, demand, goods, market, pricing=None):
     matched = []
     matched_sids = set()
     matched_dids = set()
@@ -967,7 +955,7 @@ def _allocation_for_test(mi, supply, demand, goods, pricing=None):
             if s.price > d.price:
                 continue
             qty = min(s.quantity, d.quantity)
-            price = pricing(s, d, {}) if pricing else (s.price + d.price) / 2.0
+            price = pricing(s, d, {}, market) if pricing else (s.price + d.price) / 2.0
             matched_order = Order(
                 order_id=f"t_{s.good_id}_{s.seller_id}_{d.buyer_id}_{len(matched)}",
                 seller_id=s.seller_id,
@@ -1203,6 +1191,7 @@ class TestAllocationPolicy:
                 list(sim.state.market.supply),
                 list(sim.state.market.demand),
                 sim.state.goods,
+                sim.state.market,
             )
 
             assert len(matched) == 1
@@ -1242,7 +1231,7 @@ class TestFullTickPipeline:
             hh = sim.state.households[201]
 
             firm_cash_before = firm.cash
-            hh_bread_before = hh.inventory.get(1, 0.0)
+            hh_bread_before = hh.inventory[1]
             hh_cash_before = hh.cash
             hh_cash_before = hh.cash
 
@@ -1253,7 +1242,7 @@ class TestFullTickPipeline:
 
             sim.tick()
 
-            assert hh.inventory.get(1, 0.0) > hh_bread_before, (
+            assert hh.inventory[1] > hh_bread_before, (
                 "Household bread should increase after settlement"
             )
             assert hh.cash < hh_cash_before, (

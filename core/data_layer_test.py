@@ -82,7 +82,7 @@ class TestWorldBuilder:
         wb.add_household(
             1,
             500.0,
-            labor_ask_price=10.0,
+            reservation_wage=10.0,
             is_employed=True,
             employer_firm_id=1,
             inventory={1: 5.0},
@@ -106,7 +106,7 @@ class TestWorldBuilder:
 
         assert len(ws.households) == 1
         assert ws.households[1].cash == 500.0
-        assert ws.households[1].labor_ask_price == 10.0
+        assert ws.households[1].reservation_wage == 10.0
         assert ws.households[1].is_employed is True
         assert ws.households[1].employer_firm_id == 1
         assert ws.households[1].inventory == {1: 5.0}
@@ -157,7 +157,7 @@ class TestWorldBuilder:
                 .add_household(
                     1,
                     500.0,
-                    labor_ask_price=10.0,
+                    reservation_wage=10.0,
                     is_employed=True,
                     employer_firm_id=101,
                     inventory={1: 5.0},

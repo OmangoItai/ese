@@ -2,6 +2,7 @@ import pytest
 from core.reporter import Reporter
 from core.entities import Household, Good, Firm, Government, WorldState, Order
 from core.ledger import TradeHistory
+from collections import defaultdict
 
 
 class TestCalcGini:
@@ -42,8 +43,12 @@ class TestCalcGini:
             2: Good(good_id=2, name="iron", good_type="raw_material", delivery_lag=4),
         }
         hhs = {
-            0: Household(id=0, cash=100.0, inventory={1: 10.0, 2: 5.0}),
-            1: Household(id=1, cash=200.0, inventory={1: 0.0, 2: 0.0}),
+            0: Household(
+                id=0, cash=100.0, inventory=defaultdict(float, {1: 10.0, 2: 5.0})
+            ),
+            1: Household(
+                id=1, cash=200.0, inventory=defaultdict(float, {1: 0.0, 2: 0.0})
+            ),
         }
         gini = Reporter.calc_gini(hhs, goods)
         wealth_0 = 100.0 + 10.0 * 1 + 5.0 * 4  # = 130.0
@@ -54,8 +59,8 @@ class TestCalcGini:
     def test_without_goods_no_inventory_weight(self):
         goods = None
         hhs = {
-            0: Household(id=0, cash=100.0, inventory={1: 100.0}),
-            1: Household(id=1, cash=100.0, inventory={1: 0.0}),
+            0: Household(id=0, cash=100.0, inventory=defaultdict(float, {1: 100.0})),
+            1: Household(id=1, cash=100.0, inventory=defaultdict(float, {1: 0.0})),
         }
         gini = Reporter.calc_gini(hhs, goods)
         assert gini == 0.0
@@ -265,7 +270,12 @@ class TestSnapshot:
         goods = {1: Good(good_id=1, name="bread", good_type="food")}
         firms = {1: Firm(id=1, cash=1000.0, is_active=True)}
         households = {
-            1: Household(id=1, cash=200.0, is_employed=True, inventory={1: 5.0})
+            1: Household(
+                id=1,
+                cash=200.0,
+                is_employed=True,
+                inventory=defaultdict(float, {1: 5.0}),
+            )
         }
         governments = {1: Government(id=1, cash=10000.0)}
         state = WorldState(

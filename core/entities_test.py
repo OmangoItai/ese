@@ -1,4 +1,4 @@
-from collections import deque
+from collections import defaultdict, deque
 from core.entities import (
     AgentOrders,
     Good,
@@ -120,7 +120,7 @@ class TestFirm:
         f = Firm(
             id=5,
             cash=5000.0,
-            inventory={1: 100.0, 2: 50.0},
+            inventory=defaultdict(float, {1: 100.0, 2: 50.0}),
             capacity=20.0,
             collateral=300.0,
             is_active=False,
@@ -139,7 +139,7 @@ class TestHousehold:
         assert h.id == 1
         assert h.cash == 500.0
         assert h.inventory == {}
-        assert h.labor_ask_price == 0.0
+        assert h.reservation_wage == 0.0
         assert h.is_employed is False
         assert h.employer_firm_id is None
         assert h.unemployment_ticks == 0
@@ -194,9 +194,13 @@ class TestWorldState:
     def test_nested_assembly(self):
         bread = Good(good_id=1, name="bread")
         labor = Good(good_id=2, name="labor", good_type="labor")
-        firm = Firm(id=1, cash=10000.0, inventory={1: 500.0})
+        firm = Firm(id=1, cash=10000.0, inventory=defaultdict(float, {1: 500.0}))
         hh = Household(
-            id=1, cash=1000.0, inventory={1: 50.0}, is_employed=True, employer_firm_id=1
+            id=1,
+            cash=1000.0,
+            inventory=defaultdict(float, {1: 50.0}),
+            is_employed=True,
+            employer_firm_id=1,
         )
         gov = Government(id=1, cash=50000.0, tax_rate=0.15, unemployment_benefit=30.0)
 
@@ -255,10 +259,8 @@ class TestAgentOrders:
         assert [o.order_id for o in orders] == ["o1", "o2"]
 
     def test_new_records_intent(self):
-        orders = AgentOrders([])
+        orders = AgentOrders([], entity_id=1)
         orders.new(
-            seller_id=1,
-            buyer_id=2,
             good_id=3,
             quantity=5.0,
             price=10.0,
@@ -267,6 +269,7 @@ class TestAgentOrders:
         )
         assert len(orders._new) == 1
         assert orders._new[0]["seller_id"] == 1
+        assert orders._new[0]["buyer_id"] == 0
         assert orders._new[0]["description"] == "test"
 
     def test_cancel_records_intent(self):
@@ -276,11 +279,9 @@ class TestAgentOrders:
         assert orders._cancel == ["o1", "o2"]
 
     def test_update_records_intent(self):
-        orders = AgentOrders([])
+        orders = AgentOrders([], entity_id=1)
         orders.update(
             "old",
-            seller_id=1,
-            buyer_id=2,
             good_id=3,
             quantity=5.0,
             price=10.0,
@@ -288,14 +289,14 @@ class TestAgentOrders:
         )
         assert len(orders._update) == 1
         assert orders._update[0]["order_id"] == "old"
+        assert orders._update[0]["seller_id"] == 0
+        assert orders._update[0]["buyer_id"] == 1
 
     def test_consume_returns_empty_when_no_factory(self):
-        orders = AgentOrders([])
-        orders.new(seller_id=1, buyer_id=2, good_id=3, quantity=5.0, price=10.0)
+        orders = AgentOrders([], entity_id=1)
+        orders.new(good_id=3, quantity=5.0, price=10.0)
         orders.cancel("o1")
-        orders.update(
-            "oid", seller_id=1, buyer_id=2, good_id=3, quantity=5.0, price=10.0
-        )
+        orders.update("oid", good_id=3, quantity=5.0, price=10.0)
         result = orders._consume()
         assert result["new"] == []
         assert result["cancel"] == ["o1"]
@@ -309,8 +310,8 @@ class TestAgentOrders:
         seq = Sequence()
         factory = OrderFactory(seq)
         o1 = self._make_order("existing")
-        orders = AgentOrders([o1], order_factory=factory)
-        orders.new(seller_id=1, buyer_id=2, good_id=3, quantity=5.0, price=10.0)
+        orders = AgentOrders([o1], order_factory=factory, entity_id=1)
+        orders.new(good_id=3, quantity=5.0, price=10.0)
         orders.cancel("existing")
         result = orders._consume()
         assert len(result["new"]) == 1

@@ -1,4 +1,4 @@
-from collections import deque
+from collections import defaultdict, deque
 import pytest
 from core.clearing_house import ClearingHouse
 from core.entities import Firm, Household, Government, Good, Order, WorldState
@@ -435,9 +435,9 @@ class TestSettleOrderGoods:
     def _make_ws(self, seller_cash=5000.0, buyer_cash=5000.0, goods=None):
         good = _make_good(1, "bread", good_type="consumer", delivery_lag=1)
         seller = _make_firm(1, seller_cash)
-        seller.inventory = {1: 100.0}
+        seller.inventory = defaultdict(float, {1: 100.0})
         buyer = _make_firm(2, buyer_cash)
-        buyer.inventory = {1: 0.0}
+        buyer.inventory = defaultdict(float, {1: 0.0})
         all_goods = goods or {1: good}
         return WorldState(tick=5, firms={1: seller, 2: buyer}, goods=all_goods)
 
@@ -463,7 +463,7 @@ class TestSettleOrderGoods:
         ws.pending_orders.append(order)
 
         seller_inv_before = ws.firms[1].inventory[1]
-        buyer_inv_before = ws.firms[2].inventory.get(1, 0.0)
+        buyer_inv_before = ws.firms[2].inventory[1]
 
         ok, msg, liquidated = self.ch.settle_order(ws, order)
 
@@ -472,7 +472,7 @@ class TestSettleOrderGoods:
         assert liquidated is False
         assert order.status == "FULFILLED"
         assert ws.firms[1].inventory[1] == seller_inv_before - 10.0
-        assert ws.firms[2].inventory.get(1, 0.0) == buyer_inv_before + 10.0
+        assert ws.firms[2].inventory[1] == buyer_inv_before + 10.0
         assert ws.firms[1].cash == seller_cash_original + 30.0
         assert ws.firms[2].cash == buyer_cash_original - 30.0
         assert len(ws.collateral_pool) == 0
@@ -618,7 +618,7 @@ class TestSettleOrderLabor:
 
     def _make_ws(self):
         labor_good = _make_good(10, "labor", good_type="labor", delivery_lag=1)
-        hh = _make_household(1, 1000.0, labor_ask_price=10.0)
+        hh = _make_household(1, 1000.0, reservation_wage=10.0)
         firm = _make_firm(2, 5000.0)
         return WorldState(
             tick=5,
@@ -721,14 +721,14 @@ class TestLiquidateFirm:
         self.ch.record_settled_price(1, 3, 30.0)
 
         firm = _make_firm(1, 100.0)
-        firm.inventory = {1: 50.0}
+        firm.inventory = defaultdict(float, {1: 50.0})
         firm.employees = [2, 3]
 
         hh1 = _make_household(
-            2, 200.0, labor_ask_price=5.0, is_employed=True, employer_firm_id=1
+            2, 200.0, reservation_wage=5.0, is_employed=True, employer_firm_id=1
         )
         hh2 = _make_household(
-            3, 200.0, labor_ask_price=8.0, is_employed=True, employer_firm_id=1
+            3, 200.0, reservation_wage=8.0, is_employed=True, employer_firm_id=1
         )
 
         gov = Government(id=1, cash=10000.0)
@@ -823,11 +823,11 @@ class TestLiquidateFirm:
         self.ch.record_settled_price(1, 1, 10.0)
 
         firm = _make_firm(1, 10.0)
-        firm.inventory = {1: 10.0}
+        firm.inventory = defaultdict(float, {1: 10.0})
         firm.employees = [2]
 
         hh = _make_household(
-            2, 0.0, labor_ask_price=50.0, is_employed=True, employer_firm_id=1
+            2, 0.0, reservation_wage=50.0, is_employed=True, employer_firm_id=1
         )
 
         gov = Government(id=1, cash=10000.0)
@@ -859,9 +859,9 @@ class TestSettleAllExpired:
     def test_settle_all_expired_processes_orders(self):
         good = _make_good(1, "bread", good_type="consumer", delivery_lag=1)
         seller = _make_firm(1, 5000.0)
-        seller.inventory = {1: 100.0}
+        seller.inventory = defaultdict(float, {1: 100.0})
         buyer = _make_firm(2, 5000.0)
-        buyer.inventory = {1: 0.0}
+        buyer.inventory = defaultdict(float, {1: 0.0})
 
         ws = WorldState(
             tick=5,
@@ -916,7 +916,7 @@ class TestSettleAllExpired:
     def test_settle_all_expired_handles_default(self):
         good = _make_good(1, "bread", good_type="consumer", delivery_lag=1)
         seller = _make_firm(1, 5000.0)
-        seller.inventory = {1: 1.0}
+        seller.inventory = defaultdict(float, {1: 1.0})
         buyer = _make_firm(2, 5000.0)
 
         ws = WorldState(

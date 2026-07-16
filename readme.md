@@ -1,349 +1,251 @@
 # ESE (Economic Simulation Engine)
 
-别打口水仗了，来 ese 模拟你的完美经济制度
-
 ![](headup.png)
 
-ESE 是一个回合制经济沙盒。你定义初始世界、编写主体策略和分配规则，跑 N 轮，得到一个国家的经济演化数据。换个规则再跑一次，制度优劣直接从数据中体现。
+别打口水仗了，来 ese 模拟你的完美经济制度。
+
+ESE 是一个类似回合制，按轮次执行的经济沙盒。你定义初始世界、编写主体策略和分配规则，跑 N 轮，得到一个国家的经济演化数据。换个规则再跑一次，制度的优劣直接从 Gini 系数、失业率、恩格尔系数中体现。
 
 ---
 
-## 1 ESE 基础部件
+# 一、快速开始
 
-在理解一回合怎么运转之前，先认识几个基础部件。
-
-**商品（Good）**：经济中每一类可交易的东西，用一个 good_id 标识。每种商品有一个 `good_type`（如 food、raw_material、labor）和一个 `delivery_lag`。`delivery_lag` 表示从订单匹配成功到真正交货需要经过多少轮——没有瞬时交付，模拟生产运输的时间成本。
-
-**企业（Firm）**：持有现金、库存、员工列表。可以**生产**（消耗库存中的原材料，产出新产品）、**定价买卖**、**雇佣和解雇**。每个企业有一个 `labels` 字段（如 `["farm"]`、`["steel", "tech"]`），用于 `apply()` 按标签筛选分发。企业不活跃（`is_active=False`）后不再参与任何经济行为。
-
-**家庭（Household）**：持有现金、库存、就业状态。可以**消费商品**、**求职**。家庭是劳动力的提供者和最终消费品的主要需求方。
-
-**政府（Government）**：全局唯一，内核自动完成收税和发放失业金。你也可以在政府策略中实现额外的财政行为。
-
-**订单（Order）**：一切经济活动的载体。订单分为供需两类（`SUPPLY/DEMAND`）、商品、数量、价格、状态。所有活跃订单分别进入**供给池**和**需求池**。订单不是瞬间执行的——它的生命周期是 ESE 运行的核心。
+```bash
+uv sync
+uv run python examples/generate_town.py
+uv run python examples/town.py
+```
 
 ---
 
-## 2 ESE 每轮周期
+# 二、核心范式
 
-每一轮 Tick，ese 按以下顺序执行 9 个步骤。其中第 5、6 步是你编写策略被调用的位置。
+ESE 按照轮次（tick）执行，没有规定天数。你可以认为一轮为一天，也可以认为一轮为一年——取决于你的实验设计。
 
-### 2.1	结算到期订单
+ESE 有三类主体，你需要编写三种主体在每轮经济循环中的 strategy（策略）与 behavior（行动）。
 
-本轮之前已匹配好的订单，如果设定的交割时间到了，则执行实际交付：卖方扣库存、买方加库存，买方付钱、卖方收钱，双方保证金退还。
+| 主体 | 大致行为 |
+| --- | --- |
+| Firm 企业 | 生产、订单交易（商品买卖，雇佣是特殊的劳动力交易）、生产 |
+| HouseHold 家庭 | 消费商品、劳动力交易 |
+| Government 政府 | 交易（主要为公共项目）、发放福利金 |
 
-如果卖方库存不足或买方现金不足，则该方违约。违约方的保证金罚没给对方作为补偿。交付完成后，现金为负的企业立即进入破产清算。
+ESE 要求你理解三个概念：
 
-以下是**订单生命周期**：
+| 概念 | 代码 | 职责 |
+|------|--------|------|
+| **strategy** | `@ese.firm` / `@ese.household` / `@ese.government` 装饰的函数 | 每轮只调一次，决定不同类主体的执行策略 |
+| **apply** | `ese.firm.apply(label, leaf_fn)` | 把标签匹配到的实体分发给行为函数 |
+| **behavior** | `(entity, orders, mi, market, **params)` | 一个实体每轮具体做什么 |
 
-```
-从策略创建 → [OPEN] 进入供需池
-          → [ALLOCATED] 分配策略匹配成功，设定 settlement_tick = 当前 tick +   delivery_lag
-          → 到期结算：
-             交付成功 → [FULFILLED]
-             交付失败 → [DEFAULTED]
-          → 中途被策略取消 → [CANCELLED]
-          → 在池中超过 order_expire_ticks 轮未匹配 → [EXPIRED]
-```
-
-**双边保证金**：每个订单创建时，买卖双方各冻结订单金额 x 保证金比例（base_collateral_ratio）的现金作为押金。履约退还，违约罚没。保证金比例是动态的：掉出 base，然后根据该主体的历史履约率上调——经常违约的主体需要押更多钱。
-
-**企业破产清算**：现金归零后，库存折价卖给政府换现金，回收冻结保证金，然后按优先级偿付：先结清拖欠工资，再缴纳欠税，最后归零。所有员工被解雇，所有关联订单取消或违约，企业标记为不活跃。
-
-### 2.2	工资发放
-
-每个活跃企业向自己的员工支付工资（金额 = 员工的 labor_ask_price）。现金不足的企业记录欠薪。
-
-### 2.3	收税
-
-每个活跃企业按税率缴纳所得税，收入进入政府账户。
-
-### 2.4	发失业金
-
-政府对处于失业状态的家庭发放失业金。政府现金不足时按比例削减。
-
-### 2.5	执行主体策略	← 你要写的东西之一
-
-按**企业 → 家庭 → 政府**的顺序，ese 每个 slot 只调一次你注册的**宏函数**。宏函数接收市场情报（MarketIntelligence）和商品目录，内部通过 `apply()` 分发到实体：
-
-- `ese.firm.apply("farm", leaf_fn)` — 找到所有 `"farm" in entity.labels` 的企业，逐一调用叶子函数
-- `ese.household.apply("default", leaf_fn)` — 同理，按标签匹配家庭
-- Government 只有一个实例，宏函数直接操作
-
-**叶子函数**是普通 Python 函数，签名为 `(entity, orders)`，无需装饰器。在叶子函数内部通过 `orders` 参数下单：
-
+一个典型的 ESE 程序编写范式如下：
 ```python
-orders.new(seller_id=..., buyer_id=..., ...)    # 新建订单
-orders.cancel(order_id)                          # 取消订单
-orders.update(order_id, seller_id=..., ...)      # 替换订单（先取消旧单再建新单）
-```
-
-`orders.new()` 中的订单通过校验后进入供需池，`orders.cancel()` 中的订单退还保证金、从池中移除，`orders.update()` 先校验新订单，通过后才执行替换。
-
-**策略的调度机制**
-
-ese 不再按实体逐个调用策略函数。每个 slot（firm / household / government / allocation）的宏函数每轮只被调用一次，宏函数内部用 `apply()` 按标签分发到叶子函数。
-
-以企业为例：
-
-```python
-# 叶子函数：无装饰器，普通 Python 函数
-def farm_decide(firm, orders):
-    # 生产、挂单、采购...
-    orders.new(seller_id=firm.id, ...)
-
-def workshop_decide(firm, orders):
-    ...
-
-# 宏函数：带 @ese.firm 装饰器，每轮调用一次
 @ese.firm
-def firm_macro(mi, goods):
-    ese.firm.apply("farm", farm_decide)       # label in firm.labels 就命中
-    ese.firm.apply("workshop", workshop_decide)
+def 所有企业策略
+    # 不同类企业（部门）
+    # 按何种顺序
+    # 执行哪些动作
+
+@ese.household
+def 所有家庭策略
+    # 不同类家庭
+    # 按何种顺序
+    # 执行哪些动作
+
+@ese.government
+def 所有政府策略
+
+@ese.allocation
+def 分配策略
+    # 匹配供应订单-需求订单
+@ese.allocation.pricing
+def 分配策略的价格策略
+    # 供需订单的两个价格，如何达成一致，并对齐交易
 ```
 
-`apply(label, leaf_fn, **params)` 的工作流程：
-1. 列出该 slot 下所有实体
-2. 筛选 `label in entity.labels` 的实体
-3. 跳过 `is_active=False` 的企业
-4. 为每个实体构造 `AgentOrders`，调用 `leaf_fn(entity, orders, **params)`
-5. 汇总返回值、消费订单意图
+以下是最简单的企业写法，每类企业按照机械行为进行生产与交易
+```python
+# 假设商品编号 1 为食物，2 为工具
+@ese.firm                                           # strategy：firm，每类企业（部门）按照其 behavior 执行
+def firm_strategy(mi, goods, market):
+    ese.firm.apply("farm", farm_behavior)           # apply
+    ese.firm.apply("workshop", work_behavior)
 
-一个实体可以同时有多个标签（如 `["steel", "tech"]`），两个 `apply()` 都能命中它。家庭与政府同理。
+def farm_behavior(firm, orders, mi, market):        # behavior
+    # -1 工具 +5 食物，模拟生产行为
+    firm.inventory[2] -= 1.0                        # 读/写实体状态
+    firm.inventory[1] += 5.0
+    # 挂供应订单，卖出食物
+    orders.new(good_id=1, quantity=5, price=2.0, side=OrderSide.SUPPLY)
+...
+```
 
-策略的具体内容，就是你写的逻辑：消耗多少原材料、产出多少成品、按什么价格挂单、招不招人——由你决定。ese 只提供库存读写和订单创建校验，不内置任何生产函数。
+## behavior：每个主体（企业/家庭/政府）能知道什么？
 
-### 2.6	执行分配策略
+每个 behavior 函数可用 4 个对象：
 
-ese 将**供给池**和**需求池**交给你注册的分配函数，你决定哪些买卖单配对成交：
+- **`entity（firm、hh、gov）`** — 实体实例
+  - 可读写 `cash`、`inventory`、`capacity`、`employees`、`is_active`、`tax_rate` 等字段
+- **`orders`** — 订单操作
+  - `.new(good_id, quantity, price, side)` / `.cancel(order_id)` / `.update(order_id, ...)`，引擎自动填充买卖方 ID
+- **`mi`** — 宏观情报
+  - `.gini` / `.unemployment_rate` / `.engel` / `.sector_avg_price[good_id]` 等统计局指标（经噪声处理）
+- **`market`** — 市场快照
+  - `.supply`（卖单池）、`.demand`（买单池）、`.history`（成交账本）
+
+以企业为例
+```python
+def steel_firm(firm, orders, mi, market):
+    # 企业现金
+    firm.cash
+    # 企业订单操作
+    orders.new(good_id=1, quantity=5, price=2.0, side=OrderSide.SUPPLY)
+    orders.cancel(order_id)
+    # 宏观经济指标（统计局报表，含噪声）
+    mi.unemployment_rate          # 决定是否扩招
+    mi.sector_avg_price[1]        # 食物行业均价，指导报价
+    # 市场实时信号
+    market.supply                 # 同行挂单价
+    market.history.get_avg_price_by_good(1, n=10)  # 近期成交均价
+```
+
+## strategy：每类主体的宏观策略（`@ese.firm` `@ese.househould` `@ese.government`）能知道什么？
+
+strategy 的第一个参数 `mi` 是 **MarketIntelligence** — 你可以理解为统计局的宏观数据，不含任何企业个体数据，且经噪声处理：
+
+| 字段 | 说明 |
+|------|------|
+| `mi.gini` / `mi.unemployment_rate` / `mi.engel` | 宏观指标 |
+| `mi.sector_avg_price` / `mi.sector_total_supply` / `mi.sector_total_demand` | 行业汇总 |
+| `mi.tax_rate` / `mi.unemployment_benefit` / `mi.active_firms` | 政策参数 |
+
+---
+
+# 三、分配策略
+
+分配策略`@ese.allocation`决定供需池怎么配对——它是**制度的核心**。同一个世界、同一群企业，换个分配规则，宏观结果完全不同。
+
+分配策略中的定价策略`@ese.allocation.princing`则是分类中的灵魂——需求池和供应池中的订单往往价格不一致，你需要让他们达成同一价格并进行交易。
+
+在现实世界中，这个行为往往是交易所、市商、集合竞价、场内外交易、行政定价来执行……总之这就是被人们批判的最多的“制度之恶”或“结构性压迫”——现在你需要手动编写它。
 
 ```python
 @ese.allocation
-def my_allocation(mi, supply_pool, demand_pool, goods, pricing=None):
-    # 返回 (matched_orders, remaining_supply, remaining_demand)
-    ...
-```
+def my_alloc(mi, supply, demand, goods, market, pricing=None):
+    # 你的配对逻辑
+    return matched, remaining_supply, remaining_demand
 
-分配策略是**制度的核心**。按价格优先、按配额、按随机、按任何你设计的规则——都写在这里。同一个世界、同一群企业、同一个起始状态，换一种分配规则，宏观结果可能截然不同。
-
-匹配成功的订单进入 ALLOCATED 状态，设定交割轮次（当前 tick + 商品的 delivery_lag），移入待结算队列。
-
-**定价规则**是分配策略的子策略，ese 自动注入到分配函数中：
-
-```python
 @ese.allocation.pricing
-def my_pricing(supply_order, demand_order, config):
-    # 返回成交价
-    ...
+def my_price(supply_order, demand_order, config, market):
+    return (supply_order.price + demand_order.price) / 2.0  # 简单粗暴的供需平均值定价
 ```
-
-### 2.7	清理过期订单
-
-扫描供需池，创建时间超过 `order_expire_ticks` 轮的订单标记为 EXPIRED，退还保证金，移出供/需池。
-
-### 2.8	回合收尾
-
-所有失业家庭的失业轮次 +1。
-
-### 2.9	生成市场情报
-
-ese 汇总本轮宏观数据（基尼系数、失业率、恩格尔系数、各商品均价和供需总量等），经噪声函数处理后产出下一轮的市场情报（MarketIntelligence）。
 
 ---
 
-## 3 市场情报 MarketIntelligence
+# 四、创建世界
 
-还在对计划经济实验中的上帝视角耿耿于怀吗？ese 拒绝全世界布满摄像头的**全量数据监控**的虚假社会，取而代之的是更现实的市场情报（MarketIntelligence）。在模拟社会主义国家时，你可以认为 mi 是国家统计局；在模拟资本主义国家时，你可以认为 mi 是经济分析据/美联储/劳工统计局。
-
-策略函数的第一个参数 `mi` 是一个 MarketIntelligence 对象。它**不包含**任何企业或家庭的资产负债表——你无法遍历全服查看对家的库存和现金。你的策略只能从一个"统计局报表"的视角做决策。
-
-目前已有字段：
-
-- `tick` — 当前轮次
-- `gini` — 基尼系数
-- `unemployment_rate` — 失业率
-- `engel` — 恩格尔系数
-- `sector_avg_price` — 各商品挂单均价
-- `sector_total_supply` — 各商品总供给量
-- `sector_total_demand` — 各商品总需求量
-- `tax_rate` — 税率
-- `unemployment_benefit` — 失业金标准
-- `active_firms` — 活跃企业数
-
-所有统计类字段会经过噪声函数（在 `config/default.yaml` 中配置 `noise_type`）处理后才注入策略。噪声类型包括高斯、均匀、上行偏差、下行偏差，也可以关闭噪声。无论哪种经济体制，核心都是一样的：看不到别家的库存和现金，只能从报表和均价里推断市场状态。
-
----
-
-## 4 快速开始
-
-推荐使用 uv (https://docs.astral.sh/uv/) 管理 Python 环境和依赖，而非 conda / Anaconda。
-
-uv 是纯 Python 包管理器，不捆绑预编译的科学计算库，不创建庞大的 base 环境。
-
-最重要的是，uv 解析依赖比 conda 快一个数量级，是业界主流趋势。如果你没有，可以按照如下命令安装：
-
-Windows (PowerShell)
-```sh
-powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
-```
-macOS / Linux
-```sh
-curl -LsSf https://astral.sh/uv/install.sh | sh
-```
-
-### 4.1 环境
-
-```bash
-cd ese
-uv sync
-```
-
-### 4.2 生成初始世界
-
-```bash
-uv run python examples/generate_town.py
-```
-
-生成 `examples/town_world.db`：2 种商品（food、tool）、2 家企业（农场、工坊）、10 个家庭、1 个政府。
-
-`generate_town.py` 使用 `WorldBuilder` 流式 API 定义世界，替代手写 SQL：
+用 `WorldBuilder`，不用手写 SQL：
 
 ```python
-from ese import WorldBuilder
-
 (WorldBuilder()
     .add_good(1, "food", "food", 1)
     .add_good(2, "tool", "raw_material", 1)
-    .add_firm(101, 1000.0, labels=["farm"], ...)
-    .add_household(1, 60.0, ...)
+    .add_firm(101, 1000.0, labels=["farm"], capacity=50.0, inventory={1: 20.0, 2: 5.0})
+    .add_firm(102, 1000.0, labels=["workshop"], capacity=30.0, inventory={1: 10.0, 2: 15.0})
+    .add_household(1, 60.0, reservation_wage=6.0, is_employed=True, employer_firm_id=101)
     .add_government(201, 2000.0, tax_rate=0.1, unemployment_benefit=2.0)
-    .save("examples/town_world.db"))
+    .save("town_world.db"))
 ```
-
-### 4.3 配置参数（`config/default.yaml`）
-
-```yaml
-seed: 42
-noise_type: "gaussian"
-base_collateral_ratio: 0.1
-order_expire_ticks: 30
-```
-
-### 4.4 策略编写与运行
-
-完整的参考实现见 `examples/town.py`。下面是一个自包含的最简示例（2 种商品、一家做食物的农场和一家做工具的工坊）：
-
-```python
-from ese import Engine, MarketIntelligence, Order, OrderSide
-
-ese = Engine("config/default.yaml", "examples/town_world.db", output_dir="./examples/results")
-
-# --- 叶子函数：无装饰器，由 apply() 传入实体实例 ---
-
-def farm_decide(firm, orders):
-    if firm.inventory.get(2, 0) >= 1.0:
-        firm.inventory[2] -= 1.0
-        firm.inventory[1] = firm.inventory.get(1, 0) + 5.0
-    if firm.inventory.get(1, 0) > 2.0:
-        orders.new(
-            seller_id=firm.id, buyer_id=0, good_id=1,
-            quantity=min(firm.inventory[1]-2, 10), price=2.0,
-            side=OrderSide.SUPPLY)
-    if firm.cash > 50 and firm.inventory.get(2, 0) < 10:
-        orders.new(
-            seller_id=0, buyer_id=firm.id, good_id=2,
-            quantity=2, price=3.0,
-            side=OrderSide.DEMAND)
-
-def workshop_decide(firm, orders):
-    if firm.inventory.get(1, 0) >= 2.0:
-        firm.inventory[1] -= 2.0
-        firm.inventory[2] = firm.inventory.get(2, 0) + 3.0
-    if firm.inventory.get(2, 0) > 2.0:
-        orders.new(
-            seller_id=firm.id, buyer_id=0, good_id=2,
-            quantity=min(firm.inventory[2]-2, 5), price=3.0,
-            side=OrderSide.SUPPLY)
-    if firm.cash > 50 and firm.inventory.get(1, 0) < 10:
-        orders.new(
-            seller_id=0, buyer_id=firm.id, good_id=1,
-            quantity=3, price=2.0,
-            side=OrderSide.DEMAND)
-
-def household_spend(hh, orders):
-    budget = hh.cash * 0.2
-    if budget < 0.5:
-        return
-    orders.new(
-        seller_id=0, buyer_id=hh.id,
-        good_id=1, quantity=budget*0.7/2.0, price=2.0,
-        side=OrderSide.DEMAND)
-    orders.new(
-        seller_id=0, buyer_id=hh.id,
-        good_id=2, quantity=budget*0.3/3.0, price=3.0,
-        side=OrderSide.DEMAND)
-
-# --- 宏函数：每 slot 调一次，内部用 apply() 按标签分发 ---
-
-@ese.firm
-def firm_macro(mi, goods):
-    ese.firm.apply("farm", farm_decide)
-    ese.firm.apply("workshop", workshop_decide)
-
-@ese.household
-def household_macro(mi, goods):
-    ese.household.apply("default", household_spend)
-
-@ese.government
-def gov_macro(mi, goods):
-    pass
-
-# --- 分配：价格优先匹配（不变）---
-
-@ese.allocation
-def alloc(mi, supply, demand, goods, pricing=None):
-    matched = []
-    supply = sorted([o for o in supply if o.quantity > 0], key=lambda x: x.price)
-    demand = sorted([o for o in demand if o.quantity > 0], key=lambda x: -x.price)
-    for s in supply:
-        for d in demand:
-            if s.good_id == d.good_id and s.price <= d.price:
-                qty = min(s.quantity, d.quantity)
-                price = pricing(s, d, {}) if pricing else (s.price+d.price)/2
-                matched.append(Order(
-                    order_id=f"match_{s.good_id}_{mi.tick}_{len(matched)}",
-                    seller_id=s.seller_id, buyer_id=d.buyer_id, good_id=s.good_id,
-                    quantity=qty, price=price, side=s.side))
-                s.quantity -= qty; d.quantity -= qty
-                break
-    return matched, [o for o in supply if o.quantity > 0], [o for o in demand if o.quantity > 0]
-
-@ese.allocation.pricing
-def price(supply, demand, config):
-    return (supply.price + demand.price) / 2.0
-
-snapshots = ese.run(n_ticks=50)
-ese.save(snapshots, prefix="town")
-```
-
-每轮输出一个快照字典，包含 `tick`、`gini`、`engel`、`unemployment`、`active_firms`。
+交给 AI 来做吧
 
 ---
 
-## 5 FAQ
+# 五、三种制度
 
-**Q：为什么没有内置投入产出表？**
+内核（结算器、破产规则、订单生命周期）对三种制度完全一样。区别只在 strategy 怎么写。
 
-A：实验者的策略不能直接访问全局的投入产出矩阵（A 矩阵）——那是上帝视野。策略只能从 MI（MarketIntelligence）提供的**统计局汇总报表**（行业均价、供给总量、基尼系数等，已加噪）来自行推断经济结构。这是本项目与那篇 2026 年论文最根本的差异：计划委员会也必须为估算误差付出代价。
+## 无政府自由主义市场
 
-**Q：货币总量为何恒定？**
+`apply()` 只管分发，各企业/家庭自己读 MI，利润最大原则行事（下单）。
 
-A：剔除货币政策的干扰，单纯观察资源配置制度。如需模拟通胀，可在 Government 策略中实现货币增发——当然这是 AI 说的，我不这么认为，还是建议你不要动货币总量。等到有了金融系统再去玩吧。
+```python
+@ese.firm
+def market(mi, goods, market):
+    ese.firm.apply("farm", farm_behavior)
+    ese.firm.apply("workshop", workshop_behavior)
 
-**Q：为什么没有技术创新？**
+def farm_behavior:
+    #利润最大的下单方法
+```
 
-A：因为不好做，以后再做。而且一旦做了这个，就有点像上帝开发一样，规定了技术的本质，一定会引来从哲学到经济学、社会学的争议。
+## 中央计划经济
 
-**Q：你的金融系统呢？我想玩银行**
+下面演示列昂惕夫的投入产出模型（1936）与苏联国家计划委员会的物资平衡法。
 
-A：我们注意到，整个 ESE 某种程度上就是在扮演一种绝对精神。更具体的说，就像钢铁雄心4，扮演一个国家的绝对精神的同时，也大量利用了政府的强制工具—— ESE 也这样，扮演大手发力的同时也会用到大量银行工具。这个有些复杂，虽然比技术创新好做，但也要之后再说。有些更新的优先级会比技术创新高。
+核心假设是生产技术系数矩阵 A 稳定可估。
+
+但 ESE 不提供上帝视角的 A 矩阵——计划委员会也必须从 `market.history` 的成交记录中自行拟合。
+
+```python
+@ese.firm
+def plan(mi, goods, market):
+    # 1. 摸底 — 各企业上报产能和技术系数
+    reports = {}
+    for sector in ["farm", "workshop"]:
+        reports[sector] = ese.firm.apply(sector, survey)
+
+    # 2. 从历史成交估算 A 矩阵，从上报产能推定生产瓶颈
+    A = estimate_tech_matrix(market.history, goods)     # {产出: {投入: 系数}}
+    cap = {s: max(r["capacity"] for r in reports.get(s, [{}])) for s in reports}
+
+    # 3. (I−A) 迭代求解 → 各商品生产计划
+    targets = solve_io(A, cap, population=len(ese._simulator.state.households))
+
+    # 4. 摊派 — 各企业按指标下单
+    for sector in reports:
+        ese.firm.apply(sector, execute, plan=targets)
+
+
+# survey(firm, orders, mi, market) → return {"capacity": ..., "input_per_output": ...}
+# execute(firm, orders, mi, market, plan) → 按 plan 调用 orders.new(...)
+```
+
+## 混合制
+
+MI 指标过阈值时追加干预。
+
+```python
+@ese.firm
+def mixed(mi, goods, market):
+    if mi.engel > 0.6:
+        ese.firm.apply("farm", farm_behavior, price_cap=1.5)
+    else:
+        ese.firm.apply("farm", farm_behavior)
+
+    if mi.unemployment > 0.3:
+        gap = ese.firm.apply("workshop", survey)
+        ese.firm.apply("workshop", invest, funding=sum(g["gap"] for g in gap))
+```
+
+---
+
+# 六、FAQ
+
+**为什么没有内置投入产出表？**
+
+策略只能从 MI 的统计局汇总报表（已加噪）自行推断经济结构。即使是计划委员会，也必须为估算误差付出代价。
+
+**货币总量为何恒定？**
+
+剔除货币政策干扰，单纯观察资源配置制度。
+
+**为什么没有技术创新？金融系统呢？**
+
+不好做，以后再说。
+
+---
+
+# 七、深入阅读
+
+- `docs/design.md` — 完整架构设计、API 签名、数据模型
+- `examples/town.py` — 完整可运行的市场制示例（50 轮，含 CSV + 图表输出）

@@ -32,8 +32,10 @@ class _Slot:
             if label not in entity.labels:
                 continue
             my_orders = entity.outstanding_orders(state.all_orders)
-            orders = AgentOrders(my_orders, self._sim.order_factory)
-            result = leaf_fn(entity, orders, **params)
+            orders = AgentOrders(
+                my_orders, self._sim.order_factory, entity_id=entity.id
+            )
+            result = leaf_fn(entity, orders, self._sim.mi, state.market, **params)
             results.append(result)
             self._sim._dispatch_agent_result(state, orders._consume())
         return results

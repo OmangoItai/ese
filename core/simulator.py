@@ -41,7 +41,7 @@ class Simulator:
         # 1. 结算到期订单
         self.clearing.settle_all_expired(state)
 
-        # 2. 发放工资（Firm→Household，按 labor_ask_price）
+        # 2. 发放工资（Firm→Household，按 reservation_wage）
         self._pay_wages(state)
 
         # 3. 征税（Firm→Government，按 gov.tax_rate）
@@ -86,7 +86,7 @@ class Simulator:
                 if hh is None:
                     firm.employees.remove(emp_id)
                     continue
-                wage = hh.labor_ask_price
+                wage = hh.reservation_wage
                 if firm.cash >= wage:
                     firm.cash -= wage
                     hh.cash += wage
@@ -134,15 +134,15 @@ class Simulator:
     def _execute_strategy(self, mi: MarketIntelligence, state: WorldState) -> None:
         firm_fn = self._reg.get("firm") if self._reg else None
         if firm_fn is not None:
-            firm_fn(mi, state.goods)
+            firm_fn(mi, state.goods, state.market)
 
         hh_fn = self._reg.get("household") if self._reg else None
         if hh_fn is not None:
-            hh_fn(mi, state.goods)
+            hh_fn(mi, state.goods, state.market)
 
         gov_fn = self._reg.get("government") if self._reg else None
         if gov_fn is not None:
-            gov_fn(mi, state.goods)
+            gov_fn(mi, state.goods, state.market)
 
     def _dispatch_agent_result(
         self,
@@ -214,6 +214,7 @@ class Simulator:
             list(state.market.supply),
             list(state.market.demand),
             state.goods,
+            state.market,
             pricing_fn,
         )
 

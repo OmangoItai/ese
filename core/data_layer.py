@@ -115,7 +115,7 @@ class WorldLoader:
 
             households: Dict[int, Household] = {}
             c.execute(
-                "SELECT id, cash, labor_ask_price, is_employed, "
+                "SELECT id, cash, reservation_wage, is_employed, "
                 "employer_firm_id, unemployment_ticks, labels FROM households"
             )
             cols = [d[0] for d in c.description]
@@ -125,7 +125,7 @@ class WorldLoader:
                 kwargs = {
                     "id": hid,
                     "cash": float(row_dict["cash"]),
-                    "labor_ask_price": float(row_dict["labor_ask_price"]),
+                    "reservation_wage": float(row_dict["reservation_wage"]),
                     "is_employed": bool(row_dict["is_employed"]),
                     "employer_firm_id": row_dict["employer_firm_id"],
                     "unemployment_ticks": row_dict["unemployment_ticks"],
@@ -245,7 +245,7 @@ class WorldBuilder:
         id: int,
         cash: float,
         *,
-        labor_ask_price: float = 0,
+        reservation_wage: float = 0,
         is_employed: bool = False,
         employer_firm_id: Optional[int] = None,
         inventory: Optional[Dict[int, float]] = None,
@@ -256,7 +256,7 @@ class WorldBuilder:
         hh = Household(
             id=id,
             cash=cash,
-            labor_ask_price=labor_ask_price,
+            reservation_wage=reservation_wage,
             is_employed=is_employed,
             employer_firm_id=employer_firm_id,
             labels=labels,
@@ -346,7 +346,7 @@ class WorldBuilder:
                 """CREATE TABLE households (
                     id INTEGER PRIMARY KEY,
                     cash REAL NOT NULL,
-                    labor_ask_price REAL NOT NULL DEFAULT 0.0,
+                    reservation_wage REAL NOT NULL DEFAULT 0.0,
                     is_employed INTEGER NOT NULL DEFAULT 0,
                     employer_firm_id INTEGER,
                     unemployment_ticks INTEGER NOT NULL DEFAULT 0,
@@ -396,12 +396,12 @@ class WorldBuilder:
 
             for hh in self._households.values():
                 c.execute(
-                    "INSERT INTO households (id, cash, labor_ask_price, is_employed, "
+                    "INSERT INTO households (id, cash, reservation_wage, is_employed, "
                     "employer_firm_id, unemployment_ticks, labels) VALUES (?,?,?,?,?,?,?)",
                     (
                         hh.id,
                         hh.cash,
-                        hh.labor_ask_price,
+                        hh.reservation_wage,
                         int(hh.is_employed),
                         hh.employer_firm_id,
                         hh.unemployment_ticks,
